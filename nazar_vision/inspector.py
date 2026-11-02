@@ -5,7 +5,7 @@ import time
 import cv2
 import numpy as np
 
-from . import CROP, GRID, MODEL_NAME, MODELS, locate
+from . import CROP, GRID, MODEL_NAME, MODELS, damage, locate
 from .features import Backbone
 from .images import png_b64
 from .memory import Memory
@@ -35,10 +35,11 @@ def thumbnail(img, width=320):
 
 
 class Inspector:
-    def __init__(self, cfg, backbone, bank):
+    def __init__(self, cfg, backbone, bank, library=None):
         self.cfg = cfg
         self.backbone = backbone
         self.memory = Memory(bank)
+        self.library = library              # damage.Library: names the damage on a flagged washer (optional)
         self.mask = locate.ring_mask(cfg["hole_frac"], outer=cfg["mask_outer"], inner=cfg["mask_inner"])
         self.score_crop(np.full((CROP, CROP, 3), 128, np.uint8))    # warm-up run
 
@@ -49,7 +50,8 @@ class Inspector:
             raise FileNotFoundError(f"models/ is missing {', '.join(missing)}: run ./retrain.sh "
                                     "(backbone.onnx comes from the release or nazar_vision.export)")
         cfg = json.loads((models / "config.json").read_text())
-        return cls(cfg, Backbone(models / "backbone.onnx"), np.load(models / "memory_bank.npy"))
+        return cls(cfg, Backbone(models / "backbone.onnx"), np.load(models / "memory_bank.npy"),
+                   damage.Library.load(models / "damage_library.npz"))
 
     hold = property(lambda self: self.cfg["hold"])
     reject = property(lambda self: self.cfg["reject"])
@@ -66,11 +68,11 @@ class Inspector:
             return None                     # a dark round shadow when washers are bright, etc.
         return w
 
-    def score_crop(self, crop):
+    def score_crop(self, crop, with_feats=False):
         feats = self.backbone.embed([crop])[0]
         dist = self.memory.nearest(feats)
         amap = anomaly_map(dist, self.cfg["sigma"]) * self.mask
-        return float(amap.max()), amap
+        return (float(amap.max()), amap, feats) if with_feats else (float(amap.max()), amap)
 
     def inspect(self, img, hold=None, reject=None):
         t0 = time.perf_counter()
@@ -82,9 +84,11 @@ class Inspector:
             out.update(crop=png_b64(thumbnail(img)), heatmap="", box=None)
         else:
             crop = locate.crop(img, w)
-            score, amap = self.score_crop(crop)
+            score, amap, feats = self.score_crop(crop, with_feats=True)
             out["verdict"] = "PASS" if score <= hold else "HOLD" if score < reject else "REJECT"
             out["score"] = round(score, 4)
+            if out["verdict"] != "PASS":
+                out["damage"] = damage.describe({**self.cfg, "hold": hold}, amap, self.mask, feats, score, self.library)
             out.update(crop=png_b64(crop), heatmap=png_b64(heat_overlay(crop, amap, self.mask, 0.6 * hold, reject)),
                        box=w.box(img.shape))
             f = self.cfg.get("radius_frac")
@@ -96,4 +100,5 @@ class Inspector:
 
     def health(self):
         return {"ok": True, "model": self.cfg.get("model", MODEL_NAME), "hold": round(self.hold, 4),
-                "reject": round(self.reject, 4), "bank": len(self.memory)}
+                "reject": round(self.reject, 4), "bank": len(self.memory),
+                "damage_kinds": self.library.kinds if self.library else []}
