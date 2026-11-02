@@ -61,12 +61,14 @@ Updated after every step (power cuts). After a restart: read this file and `git 
 - Fake footage deleted (footage/ removed, `./ingest.sh --reset`), baseline retrained: same HOLD 1.3469 / REJECT 1.8184,
   same confusion matrix; REPORT.md regenerated with the new wording.
 
-### In progress
-- README + docs/vision.md "Recording washers with the iPhone" (photos first), re-render PDF, copy to ../PDFs/.
+- README "Recording washers with the iPhone" (photo tips first, video tips) + "Ingest, retrain, check" + resolution
+  notes; docs/vision.md section 11 rewritten (taking photos, what ingest does, tested how) + 2 new unverified items;
+  PDF re-rendered (8 pages, checked) and copied to ../PDFs/NAZAR-02-Vision-AI.pdf.
 
-## Next
-- Docs, then final report to the coordinator.
+### In progress
+- Nothing. Task 2 complete; footage/ and data/footage/ removed, baseline model in models/.
 
 ## Next (on site)
-- Record footage with the iPhone (see README), AirDrop into footage/, `./retrain.sh`, read `REPORT.md`.
+- iPhone photos arrive: `./ingest.sh <folder> --label good` (and defect/empty), `./retrain.sh`, read `REPORT.md`,
+  check a few live good washers through Continuity Camera.
 - Attach `models/backbone.onnx` (103 MB), `backbone.json`, `memory_bank.npy` (15.6 MB), `config.json` to a GitHub release.
