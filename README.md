@@ -50,25 +50,68 @@ All responses are JSON with `Access-Control-Allow-Origin: *`; `OPTIONS` is answe
   saying what is missing, and the model is loaded as soon as it appears.
 - `--test-images`: a body is still required (the console posts its frame); responses carry `test_image`.
 
-## Recapture and retrain on site
+## Recording washers with the iPhone
 
-1. Fix the light first: the washer face should be grey with texture, not pure white.
-2. In the console, capture good washers (`label=good`): 40 or more, each a different washer or a new spot on the belt.
-   Capture every real damaged washer too (`label=defect&kind=scratch|burr|rust|crack|...`).
-3. Run **one command**:
+The model learns from photos of **good** washers taken by the same kind of camera, in the same light, at the same
+spot as the live camera. Photos are the main path; videos work too.
 
-   ```bash
-   ./retrain.sh          # split -> synthetic test images -> train -> evaluate, about 1 minute
-   ```
+**Photos (preferred)**
 
-4. Read `REPORT.md`, then restart the service.
+- Camera app, **Photo** mode at **1x**. **Live Photo OFF**, **flash OFF**.
+- Stop the lens from switching: Settings > Camera > **Macro Control ON**, then in the Camera app tap the flower
+  icon so macro is **off**. Otherwise the phone may jump to the ultra-wide lens close up.
+- Long-press the washer for **AE/AF LOCK**, then drag the sun icon **down** until the washer face shows texture
+  (grey, not pure white).
+- Phone fixed at the **same height, angle and position** as the live camera in the light tunnel. Tunnel LEDs on,
+  belt stopped.
+- One washer per photo. Move it to a new spot and turn it between photos (6-8 photos per washer), 30-40 good washers.
+  Shots less than 2 s apart with the washer not moved count as one placement.
+- Every damaged washer gets its own photos, sorted by kind: scratch, dent, rust, burr, crack, chipped, wrong-size, other.
+- A few photos of the empty belt.
+- AirDrop to the Mac. HEIC is fine (it is converted with `sips`; the SDR image of an HDR photo is used and the
+  EXIF orientation is applied).
 
-If it is interrupted, resume from a stage: `./retrain.sh train` (or `synth`, `evaluate`).
+**Videos (also supported)**
 
-Photos are read from `data/good/`, `data/capture/good/`, `data/defect/<kind>/`, `data/capture/defect/<kind>/`;
-`data/unsure/` is scored in the report only. The split is by placement (see `nazar_vision/split.py`);
-`data/placements.csv` (`file,placement`) can name placements by hand.
+- Camera app, Video **1080p at 30 fps**, **HDR Video OFF** (Settings > Camera > Record Video). HDR clips still
+  work (they are tone-mapped to SDR) but SDR is closer to the live camera.
+- Same lock, exposure, position and light as for photos. One washer per clip, moved to 6-8 positions and turned,
+  10-15 s per clip; every damaged washer in its own clip; one empty-belt clip.
+- About 4 frames per second are taken; frames where the washer did not move, blurred frames (hand moving) and frames
+  over 12 per clip are dropped. Each clip is one placement group.
 
+## Ingest, retrain, check
+
+```bash
+# straight from an AirDrop folder (no sorting needed):
+./ingest.sh ~/Downloads/good-washers --label good
+./ingest.sh ~/Downloads/scratched   --label defect --kind scratch
+./ingest.sh ~/Downloads/empty-belt  --label empty
+# or sort files into footage/good, footage/defect/<kind>, footage/empty and let retrain.sh ingest them.
+
+./retrain.sh          # ingest -> split -> synthetic test images -> train -> evaluate (1-3 minutes)
+```
+
+Then read `REPORT.md` and restart the service. The ingest summary prints one line per photo or clip
+(kept / dropped and why, rim sharpness, % of pure-white washer pixels) and `data/footage/manifest.csv` has one row
+per image. It warns when the washer face is overexposed or when there are fewer than 9 good placements.
+
+- Real damaged washers set the **REJECT** line (halfway between HOLD and the lowest real defect score) and are
+  reported as **REAL**, apart from the synthetic defects. With two or more defect placements, they alternate between
+  setting the line and the held-out test.
+- When footage exists, the first photo set (`data/good`, a webcam) is not used: it comes from another camera
+  (`python -m nazar_vision.split --with-first-set` to include it).
+- Everything is resumable: ingested files are skipped on a rerun, and `./retrain.sh train` (or `split`, `synth`,
+  `evaluate`) starts from that stage. `./ingest.sh --reset` forgets all ingested images.
+- Console captures (`/capture`) are used too: `data/capture/good/`, `data/capture/defect/<kind>/`.
+
+**Resolution.** Nothing assumes a frame size. The washer is found on a copy scaled to 640 px, every limit is relative
+to the image or the washer, and the crop around the washer is resized to 224 x 224. Ingested images are scaled to a
+long side of at most 1920 px, like the live 1920 x 1080 frames. What does matter is **how big and how sharp the washer
+looks**: if Continuity Camera uses a different lens or zoom than the Camera app, the washer is a different size in
+pixels. The live check accepts 0.5-2x the training size; check a few live inspections of good washers after training.
+
+## Layout
 ## Layout
 
 | File | What it does |
@@ -78,11 +121,13 @@ Photos are read from `data/good/`, `data/capture/good/`, `data/defect/<kind>/`, 
 | `nazar_vision/memory.py` | greedy k-center coreset, chunked nearest-neighbour distance |
 | `nazar_vision/inspector.py` | one inspection: verdict, score, crop, heatmap |
 | `nazar_vision/service.py` | the HTTP service |
+| `nazar_vision/ingest.py` | iPhone photos / videos -> one-washer training images in `data/footage/`, manifest |
 | `nazar_vision/split.py` | train / calibration / test split by placement -> `data/split.json` |
 | `nazar_vision/synth.py` | SYNTHETIC defects and no-part frames, for testing only -> `data/synthetic/` |
 | `nazar_vision/train.py` | memory bank + HOLD / REJECT lines -> `models/memory_bank.npy`, `models/config.json` |
 | `nazar_vision/evaluate.py` | confusion matrix, latency, histogram -> `REPORT.md`, `docs/score_histogram.png`, `models/eval.json` |
 | `nazar_vision/export.py` | one-off backbone export (needs torch) -> `models/backbone.onnx` |
+| `nazar_vision/fake_footage.py` | FAKE photos and videos for testing ingest only |
 
 ## Credits
 
