@@ -26,8 +26,13 @@ Updated after every step (power cuts). After a restart: read this file and `git 
 - `README.md` (setup, run, API, recapture + retrain, layout).
 - Heatmap overlay fades in smoothly (no hard-edged tint); `docs/heatmap_examples.png` (crack, burr, good, unsure).
 
-## In progress
-- docs/vision.md explainer + PDF.
+- `docs/vision.md` explainer (14 sections, histogram + heatmap images) rendered to `docs/NAZAR-02-Vision-AI.pdf`
+  (7 pages, checked page by page) and copied to `../PDFs/NAZAR-02-Vision-AI.pdf`.
+- Re-evaluated on an idle machine: in-process median 45 ms, p95 52 ms.
 
-## Next
-- `docs/vision.md` -> `docs/NAZAR-02-Vision-AI.pdf` (tools/mdpdf.py), copy to `../PDFs/`, check render with qlmanage.
+## In progress
+- Nothing. Task complete; service stopped.
+
+## Next (on site)
+- Fix lighting, capture 40+ good washers and all real defects via the console, `./retrain.sh`, read `REPORT.md`.
+- Attach `models/backbone.onnx` (103 MB), `backbone.json`, `memory_bank.npy` (15.6 MB), `config.json` to a GitHub release.

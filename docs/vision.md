@@ -34,9 +34,11 @@ reject a part, and the heatmap shows the operator where to look.
 ## 3. The steps of one inspection
 
 ```
-photo --> find washer --> square crop 224x224 --> backbone (ONNX) --> 784 patch vectors
-      --> distance of each patch to the nearest good patch --> anomaly map --> score = hottest point of the ring
-      --> PASS (score <= HOLD) / HOLD / REJECT (score >= REJECT)
+photo -> find washer -> square crop 224 x 224
+      -> backbone (ONNX) -> 784 patch vectors
+      -> distance of each patch to the nearest good patch -> anomaly map
+      -> score = hottest point of the ring
+      -> PASS (score <= HOLD) / HOLD / REJECT (score >= REJECT)
 ```
 
 | Step | Typical time on the Mac mini M4 |
