@@ -133,8 +133,10 @@ def _blob_centres(blur, lo, hi):
     return [(x, y) for _, x, y in sorted(out, reverse=True)[:3]]
 
 
-def find(img, radius_px=None, min_contrast=30.0):
-    """Washer in a BGR frame or None. radius_px = (lo, hi) expected outer radius if known from training."""
+def find(img, radius_px=None, min_contrast=30.0, allow_edge=False):
+    """Washer in a BGR frame or None. radius_px = (lo, hi) expected outer radius if known from training.
+    Works at any resolution: the search runs on a copy scaled to WORK px and all limits are relative.
+    allow_edge=True also returns a washer cut by the frame edge (ingest uses it to say why a frame was dropped)."""
     h, w = img.shape[:2]
     s = min(1.0, WORK / max(h, w))
     small = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if s < 1 else img
@@ -161,7 +163,7 @@ def find(img, radius_px=None, min_contrast=30.0):
         r, hole, contrast = m
         if abs(contrast) < min_contrast:
             continue
-        if cx - r < 1 or cy - r < 1 or cx + r > gray.shape[1] - 1 or cy + r > gray.shape[0] - 1:
+        if not allow_edge and touches_edge((cx, cy, r), gray.shape):
             continue                                            # washer cut by the frame edge
         if best is None or abs(contrast) > abs(best[4]):
             best = (cx, cy, r, hole, contrast)
@@ -169,6 +171,19 @@ def find(img, radius_px=None, min_contrast=30.0):
         return None
     cx, cy, r, hole, contrast = best
     return Washer(cx / s, cy / s, r / s, hole / s if hole else None, contrast)
+
+
+def touches_edge(circle, shape, pad=1.0):
+    cx, cy, r = circle
+    return cx - r < pad or cy - r < pad or cx + r > shape[1] - pad or cy + r > shape[0] - pad
+
+
+def count(img, first, min_contrast=30.0):
+    """1 + number of further washers after painting the first one out (ingest: one washer per frame)."""
+    rest = img.copy()
+    cv2.circle(rest, (int(first.cx), int(first.cy)), int(first.r * 1.15), tuple(int(v) for v in np.median(img.reshape(-1, 3), 0)), -1)
+    lo, hi = first.r * 0.6, first.r * 1.6
+    return 1 + (find(rest, (lo, hi), min_contrast, allow_edge=True) is not None)
 
 
 def crop(img, washer, angle=0.0, gain=1.0):
