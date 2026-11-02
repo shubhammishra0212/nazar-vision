@@ -72,3 +72,13 @@ Updated after every step (power cuts). After a restart: read this file and `git 
 - iPhone photos arrive: `./ingest.sh <folder> --label good` (and defect/empty), `./retrain.sh`, read `REPORT.md`,
   check a few live good washers through Continuity Camera.
 - Attach `models/backbone.onnx` (103 MB), `backbone.json`, `memory_bank.npy` (15.6 MB), `config.json` to a GitHub release.
+
+## 2 Nov 18:10 — first real iPhone photos (12 HEIC, 4032x3024, wide view)
+- locate.find: wide-view zoom pass (washer was ~7.7 % of the short side; the belt border was taken as the rim). First set unchanged.
+- Sorted by eye: good 2754 2756 2757 2761 2766 2767; damaged 2755 2758 2762 (stains, kind other), 2763 (chipped); unsure 2764 2765.
+- 6 good < 9 needed by split -> new nazar_vision/train_small.py (leave-one-out HOLD). train.py refactored into
+  find_washers/build_bank (regression: first set gives identical HOLD 1.347 / REJECT 1.8184 / bank 15206).
+- Result: HOLD 2.0232, REJECT 2.0428; good LOO 1.58-2.02; real defects 2.06-2.33 (LOO 3/4 REJECT, 2758 faint stain -> HOLD);
+  synthetic 30/30 REJECT; unsure 2764 1.78 PASS, 2765 2.018 PASS. Service: good PASS, chipped/stain REJECT, ~60 ms.
+- Previous first-set model kept in models/backup-first-set/.
+- NEXT: 20-30 more good washers (ideally Camo snapshots = the live picture), rerun; check live Camo scores vs HOLD.

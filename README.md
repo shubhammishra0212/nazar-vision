@@ -111,6 +111,18 @@ long side of at most 1920 px, like the live 1920 x 1080 frames. What does matter
 looks**: if Continuity Camera uses a different lens or zoom than the Camera app, the washer is a different size in
 pixels. The live check accepts 0.5-2x the training size; check a few live inspections of good washers after training.
 
+
+### Only a few good washers? (small-data mode)
+
+The normal split needs at least 9 good washers. With 4-8, run
+
+    ./ingest.sh <folder> --label good          (and --label defect --kind ... for damaged ones)
+    .venv/bin/python -m nazar_vision.train_small [--unsure <folder of photos you are not sure about>]
+
+It scores every good washer with a model built from the others (leave-one-out) to set HOLD, builds the final
+bank from all of them, sets REJECT from the real defects, and writes SMALL-DATA-REPORT.md. It is a stopgap:
+add 20-30 good washers and go back to ./retrain.sh as soon as you can.
+
 ## Layout
 ## Layout
 

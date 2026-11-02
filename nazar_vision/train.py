@@ -41,37 +41,41 @@ def conformal_hold(scores, alpha=ALPHA):
     return float(s[min(k, len(s)) - 1])
 
 
-def main():
+def bank_args(argv=None, rotations=12):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--coreset", type=float, default=0.10, help="fraction of patches kept (default 0.10)")
-    ap.add_argument("--rotations", type=int, default=12)
+    ap.add_argument("--rotations", type=int, default=rotations)
     ap.add_argument("--max-bank", type=int, default=20000)
     ap.add_argument("--max-crops", type=int, default=600, help="cap on training crops (photos x rotations)")
     ap.add_argument("--max-patches", type=int, default=250000, help="random subsample before the coreset")
-    args = ap.parse_args()
-    t_start = time.time()
-    split = load_split()
-    backbone = Backbone(MODELS / "backbone.onnx")
+    return ap
 
-    # ---- 1. washers in the training photos
-    found, geo = [], []
-    for rel in split["train"]:
+
+def find_washers(rels, log=print):
+    """Step 1: [(img, washer)] for the photos where a washer is found."""
+    found = []
+    for rel in rels:
         img = images.load(ROOT / rel)
         w = locate.find(img)
         if w is None:
-            print(f"  WARNING {rel}: no washer found, not used")
+            log(f"  WARNING {rel}: no washer found, not used")
             continue
         found.append((img, w))
-        geo.append((w.r / min(img.shape[:2]), (w.hole / w.r) if w.hole else np.nan, w.contrast))
+    return found
+
+
+def build_bank(found, args, log=print):
+    """Steps 1-3 for a list of (img, washer): geometry, augmented crops -> patches, coreset.
+    -> (bank float32 as the service will load it, cfg without hold / reject)."""
     if len(found) < 3:
         raise SystemExit("fewer than 3 training photos with a washer found")
-    geo = np.array(geo)
+    geo = np.array([(w.r / min(img.shape[:2]), (w.hole / w.r) if w.hole else np.nan, w.contrast) for img, w in found])
     radius_frac = float(np.median(geo[:, 0]))
     hole_frac = float(np.nanmedian(geo[:, 1])) if np.isfinite(geo[:, 1]).any() else None
     polarity = int(np.sign(np.median(geo[:, 2])))
     min_contrast = float(max(20.0, 0.4 * np.median(np.abs(geo[:, 2]))))
-    print(f"train: {len(found)} photos, rim radius {radius_frac:.4f} x short side, hole {hole_frac:.3f} x rim, "
-          f"ring {'brighter' if polarity > 0 else 'darker'} than belt by {np.median(np.abs(geo[:, 2])):.0f}")
+    log(f"train: {len(found)} photos, rim radius {radius_frac:.4f} x short side, hole {hole_frac:.3f} x rim, "
+        f"ring {'brighter' if polarity > 0 else 'darker'} than belt by {np.median(np.abs(geo[:, 2])):.0f}")
 
     # ---- 2. augmented crops -> patches inside the scored region
     rng = np.random.default_rng(0)
@@ -88,31 +92,48 @@ def main():
     for b in range(0, len(jobs), 32):                        # stream: never hold all crops' features at once
         crops = [locate.crop(found[i][0], found[i][1], angle=a, gain=float(rng.uniform(0.9, 1.1)))
                  for i, a in jobs[b:b + 32]]
-        f = backbone.embed(crops)[:, keep]
+        f = backbone().embed(crops)[:, keep]
         if per_crop < f.shape[1]:
             f = np.stack([x[rng.choice(len(x), per_crop, replace=False)] for x in f])
         parts.append(f.reshape(-1, f.shape[-1]))
     feats = np.ascontiguousarray(np.concatenate(parts))
-    backbone_dim = feats.shape[-1]
-    print(f"features: {len(jobs)} crops ({len(found)} photos x {rotations} rotations) -> {len(feats)} patches "
-          f"({per_crop} of {GRID * GRID} per crop) in {time.time() - t0:.1f} s")
+    log(f"features: {len(jobs)} crops ({len(found)} photos x {rotations} rotations) -> {len(feats)} patches "
+        f"({per_crop} of {GRID * GRID} per crop) in {time.time() - t0:.1f} s")
 
     # ---- 3. coreset
     k = min(args.max_bank, max(1000, int(len(feats) * args.coreset)))
     t0 = time.time()
-    bank = feats[kcenter_coreset(feats, k)]
-    print(f"coreset: kept {len(bank)} of {len(feats)} patches in {time.time() - t0:.1f} s")
-    MODELS.mkdir(exist_ok=True)
-    np.save(MODELS / "memory_bank.npy", bank.astype(np.float16))
-    bank = np.load(MODELS / "memory_bank.npy")             # score with exactly what the service will load
-
-    cfg = {"model": MODEL_NAME, "version": VERSION, "dim": int(backbone_dim), "grid": GRID, "crop": CROP,
+    bank = feats[kcenter_coreset(feats, k, log=log)]
+    log(f"coreset: kept {len(bank)} of {len(feats)} patches in {time.time() - t0:.1f} s")
+    bank = bank.astype(np.float16).astype(np.float32)        # score with exactly what the service will load
+    cfg = {"model": MODEL_NAME, "version": VERSION, "dim": int(feats.shape[-1]), "grid": GRID, "crop": CROP,
            "margin": locate.MARGIN, "sigma": SIGMA, "mask_outer": MASK_OUTER, "mask_inner": MASK_INNER,
            "radius_frac": round(radius_frac, 5), "hole_frac": round(hole_frac, 4) if hole_frac else None,
            "polarity": polarity, "min_contrast": round(min_contrast, 1), "bank": int(len(bank)),
            "radius_range": [0.5, 2.0],      # live washer may look 0.5-2x the training size (other lens / zoom)
-           "hold": 0.0, "reject": 0.0}
-    insp = Inspector(cfg, backbone, bank)
+           "hold": 0.0, "reject": 0.0, "n_train": len(found), "rotations": rotations,
+           "coreset": args.coreset, "patches_before_coreset": int(len(feats))}
+    return bank, cfg
+
+
+_backbone = None
+
+
+def backbone():
+    global _backbone
+    if _backbone is None:
+        _backbone = Backbone(MODELS / "backbone.onnx")
+    return _backbone
+
+
+def main():
+    args = bank_args().parse_args()
+    t_start = time.time()
+    split = load_split()
+    bank, cfg = build_bank(find_washers(split["train"]), args)
+    MODELS.mkdir(exist_ok=True)
+    np.save(MODELS / "memory_bank.npy", bank.astype(np.float16))
+    insp = Inspector(cfg, backbone(), bank)
 
     # ---- 4. HOLD from calibration photos
     def scores(rels):
@@ -146,8 +167,7 @@ def main():
 
     cfg.update(hold=math.ceil(hold * 1e4) / 1e4, reject=math.ceil(reject * 1e4) / 1e4, hold_rule=hold_rule, reject_rule=reject_rule,
                calib_scores={k: v and round(v, 4) for k, v in calib.items()},
-               defect_scores={k: v and round(v, 4) for k, v in defect.items()}, n_train=len(found), rotations=rotations, sources=split.get("sources", ""),
-               coreset=args.coreset, patches_before_coreset=int(len(feats)),
+               defect_scores={k: v and round(v, 4) for k, v in defect.items()}, sources=split.get("sources", ""),
                trained=time.strftime("%Y-%m-%dT%H:%M:%S"), train_seconds=round(time.time() - t_start, 1))
     (MODELS / "config.json").write_text(json.dumps(cfg, indent=2))
     print(f"calibration scores: {[round(v, 4) for v in sorted(good_scores)]}")
