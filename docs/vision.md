@@ -178,21 +178,71 @@ Tested with curl: health, a good photo (PASS), a synthetic notch (REJECT), a fra
 grey PNG (NO_PART), threshold overrides, wrong numbers, a text body, an empty body, a cut-off JPEG, captures, a wrong
 label, the OPTIONS pre-flight and an unknown address. All answered correctly and the service stayed up.
 
-## 11. Recapture and retrain on site
+## 11. Recording washers with the iPhone and retraining
 
-The first photo set is weak, so the plan is to recapture at the venue:
+The first photo set is weak (webcam, overexposed, few placements), so the model will be retrained on iPhone photos
+taken at the venue. The iPhone is also the live camera (Continuity Camera in the console), so training and live
+images come from the same phone.
 
-1. **Light first.** Dim or diffuse the lamp, or lower the camera exposure, until the washer face looks grey with
-   texture, not pure white. A scratch the camera cannot see, the model cannot find.
-2. **Capture good washers** from the console (label good): 40 or more, each a different washer or a new spot on the
-   belt. Photos of an unmoved washer count as one placement.
-3. **Capture every real damaged washer** with its kind (label defect, kind scratch, burr, rust, ...).
-4. Run **`./retrain.sh`**. About one minute. It splits the photos by placement, makes synthetic test images, trains,
-   evaluates and rewrites `REPORT.md`.
-5. Read `REPORT.md`, then restart the service.
+### Taking the photos (main path)
+
+1. **Camera app, Photo mode, 1x.** Live Photo OFF, flash OFF.
+2. **Keep the same lens.** Settings > Camera > Macro Control ON, then tap the flower icon in the Camera app so macro
+   is off. Otherwise the phone may switch to the ultra-wide lens close up and the washer looks different.
+3. **Lock and darken.** Long-press the washer for AE/AF LOCK, then drag the sun icon down until the washer face shows
+   grey texture, not pure white. A scratch the camera cannot see, the model cannot find.
+4. **Same place as the live camera.** Phone fixed at the same height, angle and position as the live camera in the
+   light tunnel, tunnel LEDs on, belt stopped.
+5. **Good washers:** one washer per photo, moved to a new spot and turned between photos, 6-8 photos per washer,
+   30-40 washers.
+6. **Damaged washers:** every one photographed on its own, kept apart by kind (scratch, dent, rust, burr, crack,
+   chipped, wrong-size, other). A few photos of the **empty belt** too.
+7. **AirDrop** them to the Mac.
+
+Videos also work: Video 1080p 30 fps, HDR Video OFF (Settings > Camera > Record Video), the same lock and position,
+one washer per clip moved to 6-8 spots and turned, 10-15 s per clip, every damaged washer in its own clip, one
+empty-belt clip.
+
+### What ingest does
+
+`./ingest.sh <folder> --label good` (or `--label defect --kind scratch`, or `--label empty`) reads a folder straight
+from AirDrop; files can also be sorted into `footage/good`, `footage/defect/<kind>` and `footage/empty`.
+
+- **HEIC** photos are converted with the macOS tool `sips`; for an HDR photo this gives the normal (SDR) picture.
+  The EXIF orientation is applied, and the EXIF time says when each photo was taken.
+- **Videos**: ffmpeg takes about 4 frames per second, turns the picture upright from the rotation tag, and maps HDR
+  (HLG / Dolby Vision) to normal SDR so frames are not grey and flat. Each clip is one placement.
+- Every image is scaled so its long side is at most 1920 px, like the live 1920 x 1080 frames.
+- An image is **kept** only if exactly one washer is found, fully inside the frame, with a crisp rim. Sharpness is
+  measured on the rim edge itself (how steep the step from washer to belt is), so a smooth, well-exposed washer is not
+  mistaken for a blurry one.
+- **Near-copies** are dropped: two photos less than 2 s apart with the washer in the same spot count as one placement,
+  and in a video a frame where the washer has not moved is skipped. At most 12 frames per clip.
+- A summary line per photo or clip says what was kept and why the rest was dropped, and warns when the washer face is
+  overexposed. Every image is listed in `data/footage/manifest.csv`.
+
+### Retrain
+
+Run **`./retrain.sh`** (1-3 minutes). It ingests, splits by placement, makes synthetic test images, trains, evaluates
+and rewrites `REPORT.md`. Real damaged washers now set the **REJECT** line (halfway between HOLD and the lowest real
+defect score) and are reported as **REAL**, separately from the synthetic ones. If a power cut stops it, run it again:
+finished photos are skipped, and `./retrain.sh train` starts from a later stage. Then restart the service.
 
 The split is **by placement, not by photo**: photos of a washer that was not moved are near-copies, and if one were in
-training and its twin in the test, the test would look better than reality. Byte-identical files are dropped.
+training and its twin in the test, the test would look better than reality.
+
+**Image size does not matter** to the inspection: it finds the washer, crops around it and resizes the crop to
+224 x 224. What matters is how big and sharp the washer looks; that is why the phone must sit where the live camera
+sits, with the same lens.
+
+### Tested how
+
+No real iPhone file has arrived yet, so the pipeline was tested on **fake** iPhone files made from the first photos:
+HEIC photos (including one stored sideways with an EXIF orientation tag, a 48-megapixel one, a burst of three, a blurred
+one, one with the washer cut by the frame edge, one with two washers, an empty belt), H.264 videos, an HEVC 10-bit
+HDR (HLG) video and a portrait video with a rotation tag. Every case was kept or dropped as intended, the sideways photo
+came out upright, the HDR video came out with normal brightness, and the whole `./retrain.sh` ran end to end. The fake
+files were then deleted and the model retrained on the first photo set (the numbers below).
 
 ## 12. Current numbers (first photo set)
 
@@ -224,6 +274,13 @@ score 0.83-1.35. Speed: 45 ms median, 52 ms p95 inside the service; 50 ms median
   `size_ratio` so a size rule could be added, but it was not, because it is untested.
 - **The real camera at belt speed** (motion blur, exposure drift, the exact stop position) has not been tested with this
   service.
+- **Real iPhone files** have not been ingested yet: the HEIC, HDR and rotation handling was tested on fake files made on
+  this Mac. In particular, whether `sips` gives the SDR picture of a real iPhone HDR photo (with its gain map) and the
+  right orientation of a real portrait HEIC is checked only with synthetic files; a wrong orientation would not hurt
+  the model (it trains on turned copies anyway).
+- **Continuity Camera vs the Camera app**: if the live feed uses a different lens or zoom than the photos, the washer
+  has a different size and sharpness. The live check accepts 0.5-2 times the training size, but the scores may shift;
+  check a few good washers live after retraining.
 - Thresholds are set from very few photos and will move after recapture.
 
 ## 14. Words used
@@ -239,3 +296,5 @@ score 0.83-1.35. Speed: 45 ms median, 52 ms p95 inside the service; 50 ms median
 | Conformal calibration | Setting a threshold from held-out good scores with a probability guarantee |
 | ONNX / ONNX Runtime | Standard network file / engine that runs it on the CPU |
 | Placement | One washer lying in one spot; all its photos are near-copies |
+| Ingest | Turning AirDropped photos and videos into clean one-washer training images |
+| HEIC, HLG | Apple's photo format; the HDR video format iPhones record |
