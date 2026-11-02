@@ -30,9 +30,19 @@ Updated after every step (power cuts). After a restart: read this file and `git 
   (7 pages, checked page by page) and copied to `../PDFs/NAZAR-02-Vision-AI.pdf`.
 - Re-evaluated on an idle machine: in-process median 45 ms, p95 52 ms.
 
-## In progress
-- Nothing. Task complete; service stopped.
+## In progress (task 2: iPhone footage pipeline)
+- `nazar_vision/ingest.py` + `ingest.sh`: footage/good, footage/defect/<kind>, footage/empty -> frames (ffmpeg ~4 fps,
+  HDR tone-map, rotation) -> locator filters (one washer, inside frame, sharp, not near-duplicate, cap per clip)
+  -> data/footage/... + manifest CSV. Each clip = one placement group.
+
+## Next
+- split/train/evaluate: footage clips as groups, real empty-belt frames, REAL defects set REJECT (midway) and are
+  reported apart from synthetic; cap training crops so hundreds of frames fit in memory.
+- retrain.sh: `ingest` as first stage when footage/ exists (resumable).
+- End-to-end test on fake footage (H.264 slideshow with shifts/rotation/blur/empty + HEVC 10-bit HLG + rotation
+  metadata + HEIC). Remove fake footage afterwards and retrain on data/ to restore models + REPORT.md.
+- README + docs/vision.md "Recording washers with the iPhone"; re-render PDF, copy to ../PDFs/.
 
 ## Next (on site)
-- Fix lighting, capture 40+ good washers and all real defects via the console, `./retrain.sh`, read `REPORT.md`.
+- Record footage with the iPhone (see README), AirDrop into footage/, `./retrain.sh`, read `REPORT.md`.
 - Attach `models/backbone.onnx` (103 MB), `backbone.json`, `memory_bank.npy` (15.6 MB), `config.json` to a GitHub release.
