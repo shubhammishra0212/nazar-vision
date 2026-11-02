@@ -8,6 +8,10 @@ Steps:
      round: that is the outer rim. The hole is the strongest all-round edge inside 0.75 x rim.
   3. A washer is only accepted if the rim edge is strong and the ring is clearly brighter or darker than
      the belt just outside it. Otherwise: no part (NO_PART), never a defect.
+  4. Wide view (washer small in the frame, belt borders and rails in view): step 2 then finds the belt border
+     as the "outermost edge" and rejects everything. So if the whole frame gives nothing, small circles are
+     looked for, and steps 1-3 run again on a full-resolution window around each one, where the washer
+     dominates. Close-up frames never reach this step, so they behave exactly as before.
 """
 from dataclasses import dataclass
 
@@ -139,7 +143,40 @@ def _blob_centres(blur, lo, hi):
     return [(x, y) for _, x, y in sorted(out, reverse=True)[:3]]
 
 
-def find(img, radius_px=None, min_contrast=30.0, allow_edge=False):
+def _small_circles(blur, side):
+    """Wide view: centres and radii of small circles (rim or hole) on the scaled frame, strongest first."""
+    lo, hi = max(4, int(side * 0.02)), max(8, int(side * 0.16))
+    c = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, dp=1.2, minDist=2 * lo, param1=100, param2=22,
+                         minRadius=lo, maxRadius=hi)
+    return [] if c is None else [(float(x), float(y), float(r)) for x, y, r in c[0][:6]]
+
+
+def _find_zoomed(img, s, blur, radius_px, min_contrast, allow_edge):
+    """Step 4: run find() on a full-resolution window around each small circle; best ring contrast wins."""
+    h, w = img.shape[:2]
+    side = min(blur.shape)
+    found_all = []
+    for x, y, r in _small_circles(blur, side):
+        half = max(3.5 * r, 0.15 * side) / s                  # Hough may have found the hole: keep room for the rim
+        x0, y0 = max(0, int(x / s - half)), max(0, int(y / s - half))
+        x1, y1 = min(w, int(x / s + half)), min(h, int(y / s + half))
+        if x1 - x0 < 16 or y1 - y0 < 16:
+            continue
+        found = find(img[y0:y1, x0:x1], radius_px, min_contrast, allow_edge, _zoom=False)
+        if found is None:
+            continue
+        found.cx += x0
+        found.cy += y0
+        if not allow_edge and touches_edge((found.cx, found.cy, found.r), img.shape):
+            continue
+        found_all.append(found)
+    # a window that only saw the hole reports it as a dark "washer": drop anything lying inside a bigger find
+    inside = lambda a, b: b.r > a.r / 0.75 and np.hypot(a.cx - b.cx, a.cy - b.cy) < 0.3 * b.r
+    found_all = [a for a in found_all if not any(inside(a, b) for b in found_all if b is not a)]
+    return max(found_all, key=lambda f: abs(f.contrast), default=None)
+
+
+def find(img, radius_px=None, min_contrast=30.0, allow_edge=False, _zoom=True):
     """Washer in a BGR frame or None. radius_px = (lo, hi) expected outer radius if known from training.
     Works at any resolution: the search runs on a copy scaled to WORK px and all limits are relative.
     allow_edge=True also returns a washer cut by the frame edge (ingest uses it to say why a frame was dropped)."""
@@ -174,7 +211,7 @@ def find(img, radius_px=None, min_contrast=30.0, allow_edge=False):
         if best is None or abs(contrast) > abs(best[4]):
             best = (cx, cy, r, hole, contrast)
     if best is None:
-        return None
+        return _find_zoomed(img, s, blur, radius_px, min_contrast, allow_edge) if _zoom else None
     cx, cy, r, hole, contrast = best
     return Washer(cx / s, cy / s, r / s, hole / s if hole else None, contrast)
 
