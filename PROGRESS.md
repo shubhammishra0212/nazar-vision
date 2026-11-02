@@ -34,8 +34,8 @@ Updated after every step (power cuts). After a restart: read this file and `git 
 ### Done
 - `nazar_vision/ingest.py` + `ingest.sh` (commit 838946c): photos HEIC (sips -> JPEG, primary/SDR image) / JPG / PNG,
   EXIF orientation applied, EXIF capture time, bursts (< 2 s, centre within 6 % r) = one group; videos via ffmpeg
-  (4 fps, HLG/PQ tone-map, rotation metadata); filters: one washer, inside frame (10 % r margin), sharpness >= 15
-  (Laplacian var on the 224 crop), near-copies, 12/clip cap, size outliers; manifest `data/footage/manifest.csv`;
+  (4 fps, HLG/PQ tone-map, rotation metadata); filters: one washer, inside frame (10 % r margin), rim sharpness,
+  near-copies, 12/clip cap, size outliers; manifest `data/footage/manifest.csv`;
   per-source records in `data/footage/_records/` so reruns skip finished sources.
 - Locator crash fixed (flat ray -> IndexError) in `locate.py` (commit 6c2c920) - also protects the live service.
 - `nazar_vision/fake_footage.py` (FAKE test data only).
@@ -65,12 +65,7 @@ Updated after every step (power cuts). After a restart: read this file and `git 
 - README + docs/vision.md "Recording washers with the iPhone" (photos first), re-render PDF, copy to ../PDFs/.
 
 ## Next
-- split/train/evaluate: footage clips as groups, real empty-belt frames, REAL defects set REJECT (midway) and are
-  reported apart from synthetic; cap training crops so hundreds of frames fit in memory.
-- retrain.sh: `ingest` as first stage when footage/ exists (resumable).
-- End-to-end test on fake footage (H.264 slideshow with shifts/rotation/blur/empty + HEVC 10-bit HLG + rotation
-  metadata + HEIC). Remove fake footage afterwards and retrain on data/ to restore models + REPORT.md.
-- README + docs/vision.md "Recording washers with the iPhone"; re-render PDF, copy to ../PDFs/.
+- Docs, then final report to the coordinator.
 
 ## Next (on site)
 - Record footage with the iPhone (see README), AirDrop into footage/, `./retrain.sh`, read `REPORT.md`.
