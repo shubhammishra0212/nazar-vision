@@ -1,0 +1,7 @@
+# Runtime (service, training, evaluation). No torch needed.
+onnxruntime>=1.18
+numpy>=1.26
+opencv-python-headless>=4.9
+pillow>=10.1
+# Only for nazar_vision/export.py (one-off backbone export), in a separate venv:
+#   torch torchvision onnx
