@@ -21,12 +21,14 @@ VIDEOS
   - ffmpeg extracts ~4 frames/s. ffmpeg applies the rotation metadata itself. HDR (HLG / PQ, e.g. iPhone Dolby
     Vision) is tone-mapped to SDR BT.709 so frames are not washed out. Each clip is one placement group.
   - Inside a clip a frame is dropped if the washer barely moved (< 6 % of its radius) AND looks the same as a frame
-    already kept, or if it is blurrier than half the clip's median. At most 12 frames per clip, spread over time.
+    already kept, or if it is blurrier than 0.6 x the clip's median. At most 12 frames per clip, spread over time.
 EVERY IMAGE
   - Scaled so the long side is <= 1920 px (the live camera is 1920 x 1080). The inspection itself is resolution
     independent: it crops around the washer and resizes the crop to 224 x 224.
   - Kept only if exactly one washer is found, fully inside the frame with a margin of 10 % of its radius, and the
-    washer crop is sharp enough (variance of the Laplacian on the 224 x 224 crop >= --min-sharp, default 15).
+    rim is sharp enough: locate.edge_sharpness >= --min-sharp (default 0.22; sharp photos ~0.35-0.5, a 3 px blur
+    ~0.19). It measures the rim edge, not surface texture, so a smooth, well-exposed washer is not called blurry.
+    The variance of the Laplacian (texture) is reported in the manifest too.
   - A washer whose size (radius / short side) is more than 25 % off the median good washer is dropped as a
     mis-detection, except in defect/wrong-size.
   - The share of washer pixels that are pure white (>= 250) is reported: above ~20 % the photo is overexposed.
@@ -64,7 +66,7 @@ KINDS = ("scratch", "dent", "rust", "burr", "crack", "chipped", "wrong-size", "o
 PHOTO_EXT = {".heic", ".heif", ".jpg", ".jpeg", ".png"}
 VIDEO_EXT = {".mov", ".mp4", ".m4v"}
 
-DEFAULTS = dict(fps=4.0, max_side=1920, cap=12, min_sharp=15.0, rel_sharp=0.5, dup_move=0.06, dup_look=6.0,
+DEFAULTS = dict(fps=4.0, max_side=1920, cap=12, min_sharp=0.22, rel_sharp=0.6, dup_move=0.06, dup_look=6.0,
                 burst_s=2.0, edge_pad=0.10, radius_tol=0.25, empty_cap=6)
 
 
@@ -210,11 +212,12 @@ def analyse(img, label, cfg):
     crop = locate.crop(img, wsh)
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
     ring = locate.ring_mask((wsh.hole / wsh.r) if wsh.hole else 0.35) > 0.5
-    a["sharp"] = round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 1)
+    a["sharp"] = round(locate.edge_sharpness(crop), 3)
+    a["texture"] = round(float(cv2.Laplacian(gray, cv2.CV_64F).var()), 1)
     a["clipped"] = round(float((gray[ring] >= 250).mean()), 3)
     a["look"] = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
     if a["sharp"] < cfg["min_sharp"]:
-        a["reason"] = f"too blurry (sharpness {a['sharp']:.0f} < {cfg['min_sharp']:.0f})"
+        a["reason"] = f"too blurry (rim sharpness {a['sharp']:.2f} < {cfg['min_sharp']:.2f})"
     return a
 
 
@@ -292,7 +295,8 @@ def ingest_video(path, label, kind, cfg):
         med = float(np.median([items[i]["sharp"] for i in ok]))
         for i in ok:
             if items[i]["sharp"] < cfg["rel_sharp"] * med:
-                items[i]["reason"] = f"blurrier than the clip (sharpness {items[i]['sharp']:.0f} < half of {med:.0f})"
+                items[i]["reason"] = (f"blurrier than the clip (rim sharpness {items[i]['sharp']:.2f} < "
+                                      f"{cfg['rel_sharp']:.1f} x median {med:.2f})")
     kept = []
     for i, a in enumerate(items):
         if a["reason"]:
@@ -392,7 +396,8 @@ def build(cfg, log=print):
             rows.append({"source": rec["source"], "type": rec["type"], "time_s": a.get("t", 0.0),
                          "label": rec["label"], "kind": rec["kind"] or "", "group": g if out else "",
                          "width": a.get("w", ""), "height": a.get("h", ""), "radius_ratio": a.get("ratio", ""),
-                         "sharpness": a.get("sharp", ""), "clipped_white": a.get("clipped", ""),
+                         "sharpness": a.get("sharp", ""), "texture": a.get("texture", ""),
+                         "clipped_white": a.get("clipped", ""),
                          "kept": "yes" if out else "no", "reason": a.get("reason", ""), "output": out})
     OUT.mkdir(parents=True, exist_ok=True)
     with (OUT / "manifest.csv").open("w", newline="") as f:
@@ -421,7 +426,7 @@ def summary(records, rows, med, log):
             extra = f"  [{p['codec']} {p['w']}x{p['h']} {p['pix_fmt']}{' HDR->SDR' if p['transfer'] in ('arib-std-b67', 'smpte2084') else ''}{' rot ' + str(p['rotation']) if p['rotation'] else ''}]"
         sharp = [x["sharpness"] for x in r if x["kept"] == "yes" and x["sharpness"] != ""]
         clip = [x["clipped_white"] for x in r if x["kept"] == "yes" and x["clipped_white"] != ""]
-        meas = f"  sharp {np.median(sharp):.0f}" if sharp else ""
+        meas = f"  sharp {np.median(sharp):.2f}" if sharp else ""
         meas += f"  white {100 * np.median(clip):.0f}%" if clip else ""
         log(f"{Path(rec['source']).name[:34]:34s} {lab:16s} {k:>4d}/{len(r):<4d}  "
             + (", ".join(f"{v} {kk}" for kk, v in why.items()) or "-") + meas + extra)

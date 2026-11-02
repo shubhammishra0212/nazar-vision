@@ -207,6 +207,21 @@ def crop(img, washer, angle=0.0, gain=1.0):
     return rgb
 
 
+def edge_sharpness(crop_rgb):
+    """How crisp the outer rim is on a crop: steepest brightness step across the rim (grey levels per pixel)
+    divided by the ring-to-belt contrast, median over 96 rays. About 0.35-0.5 when sharp, 0.26 after a 2 px
+    Gaussian blur, 0.12 after 5 px. Independent of exposure and of surface texture (a smooth, well-exposed
+    face has little texture but still a crisp rim). 0 if the rim has no contrast."""
+    g = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    rim = CROP / 2 / (1 + MARGIN)
+    radii = np.arange(0.8 * rim, min(1.07 * rim, CROP / 2 - 1), 0.5, dtype=np.float32)
+    prof = _rays(g, CROP / 2, CROP / 2, radii)
+    step = np.abs(prof[:6].mean(0) - prof[-6:].mean(0))
+    grad = np.abs(np.diff(prof, axis=0)).max(0) * 2
+    ok = step > 20
+    return float(np.median(grad[ok] / step[ok])) if ok.sum() > 10 else 0.0
+
+
 def ring_mask(hole_frac, size=CROP, outer=1.04, inner=0.7, soft=3.0):
     """Float mask on the crop: 1 on the washer ring, 0 outside the rim and in the middle of the hole.
     outer is in rim radii; inner is a fraction of the hole radius (so the hole EDGE is still scored)."""
