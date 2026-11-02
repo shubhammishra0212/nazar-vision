@@ -21,7 +21,7 @@ def heat_overlay(crop, amap, mask, lo, hi):
     """Colour heatmap over the crop: transparent below lo, full colour at hi (the reject line)."""
     t = np.clip((amap - lo) / max(hi - lo, 1e-6), 0, 1)
     colour = cv2.applyColorMap((t * 255).astype(np.uint8), cv2.COLORMAP_TURBO)[..., ::-1].astype(np.float32)
-    alpha = (0.25 + 0.5 * t)[..., None] * (t[..., None] > 0)
+    alpha = (0.75 * t)[..., None]                       # fades in smoothly, no hard edge
     base = crop.astype(np.float32)
     dim = 0.45 + 0.55 * mask[..., None]                    # grey out what is not scored
     out = base * dim * (1 - alpha) + colour * alpha

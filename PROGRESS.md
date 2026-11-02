@@ -18,10 +18,15 @@ Updated after every step (power cuts). After a restart: read this file and `git 
   empty body, truncated JPEG, capture good, capture defect PNG + kind sanitising, bad label, OPTIONS 204 + CORS, unknown path.
   All answered HTTP 200 JSON; service stayed up. Test captures deleted afterwards.
 
+- `requirements.txt`, `PROGRESS.md`.
+- `retrain.sh` resumable by stage (`./retrain.sh train`); full run 62 s wall clock, same numbers.
+- `--test-images data/synthetic` tested: frames replaced in order (burr, burr, ..., nopart), `test_images` in /health.
+- HTTP round trip (curl, 20 calls, warm): 1280x720 JPEG median 50 ms p95 53 ms; 1920x1080 median 47 ms p95 53 ms
+  (1080p verdict PASS 0.886, same as 720p). 4 parallel requests all answered. First call after start ~115 ms.
+- Heatmap overlay fades in smoothly (no hard-edged tint); `docs/heatmap_examples.png` (crack, burr, good, unsure).
+
 ## In progress
-- PROGRESS.md, requirements.txt, README.md.
+- README.md.
 
 ## Next
-- Test `--test-images` mode and HTTP round-trip latency (curl, 20 calls).
-- `retrain.sh` resumable by stage; one full `./retrain.sh` run.
 - `docs/vision.md` -> `docs/NAZAR-02-Vision-AI.pdf` (tools/mdpdf.py), copy to `../PDFs/`, check render with qlmanage.
