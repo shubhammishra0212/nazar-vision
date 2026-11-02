@@ -44,9 +44,25 @@ Updated after every step (power cuts). After a restart: read this file and `git 
   upright (mean abs diff 0.74 vs 50.8 if wrong), 48 MP HEIC -> 1920x1080, PNG without EXIF kept; 2 fake chipped
   defects + 1 empty belt kept. White-pixel warning fires (77 %). Rerun skips all sources (0.17 s).
 
+- Pipeline wired in: `split.py` (footage groups; data/good first set skipped when footage exists; REAL defects
+  alternate REJECT-set/test, a single one sets REJECT; empty belt), `train.py` (<= 600 crops, <= 250k patches,
+  bank <= 20k, live size range 0.5-2x), `evaluate.py` (REAL vs SYNTHETIC rows, real empty belt, distances in washer
+  radii), `retrain.sh` (stage `ingest` first when footage/ or earlier ingests exist).
+- Found: this Mac's ffmpeg (~/Library/Python/3.14/bin, Remotion build) has NO fps/select filters -> frames sampled
+  with `-r`. libx265 there is 8-bit only -> fake 10-bit clips use hevc_videotoolbox Main10.
+- HLG tone-map chosen by test: zscale npl=203 + tonemap mobius (mean abs diff 13.6 vs SDR source; hable 65.6).
+- Blur judged by rim-edge sharpness (`locate.edge_sharpness`, threshold 0.22): Laplacian variance called a smooth,
+  well-exposed HLG washer blurry (13-21 < 15).
+- END-TO-END on FAKE footage (`./retrain.sh`, 2.5 min): 10 good clips (1 HEVC Main10 HLG, 1 HEVC Main10 portrait
+  rotation 90, 8 H.264) + 2 FAKE crack clips (HLG) + empty clip + the fake photo set. Kept 7/42 frames per good clip
+  (30 near-copies, 5 motion frames), 6/34 per crack clip, empty capped 6/14. Split 86 good images / 26 placements.
+  REJECT = 1.9636 by the midway rule from 7 REAL-labelled (fake) defects; held-out REAL 7/7 REJECT, synthetic 25/25,
+  real empty 7/7 NO_PART, good test 4 PASS 1 HOLD; 49 ms median. Rerun of ingest skips all sources (0.2 s).
+- Fake footage deleted (footage/ removed, `./ingest.sh --reset`), baseline retrained: same HOLD 1.3469 / REJECT 1.8184,
+  same confusion matrix; REPORT.md regenerated with the new wording.
+
 ### In progress
-- split/train/evaluate: footage groups, real empty-belt frames, REAL defects set REJECT (midway) and are reported apart
-  from synthetic; cap training crops for hundreds of images.
+- README + docs/vision.md "Recording washers with the iPhone" (photos first), re-render PDF, copy to ../PDFs/.
 
 ## Next
 - split/train/evaluate: footage clips as groups, real empty-belt frames, REAL defects set REJECT (midway) and are
