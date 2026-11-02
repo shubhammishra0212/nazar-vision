@@ -131,9 +131,10 @@ def write_clip(frames, path, fps=30, codec="h264", hlg=False, rotate=0):
             cv2.imwrite(f"{td}/{i:05d}.png", f)
         vf = []
         if hlg:
-            vf = ["zscale=tin=bt709:pin=bt709:min=bt709:t=arib-std-b67:p=bt2020:m=bt2020nc:npl=100:r=tv",
-                  "format=yuv420p10le"]
-        enc = (["-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1", "-x265-params", "log-level=error"]
+            vf = ["zscale=tin=bt709:pin=bt709:min=bt709:t=arib-std-b67:p=bt2020:m=bt2020nc:npl=203:r=tv",
+                  "format=p010le"]
+        # HEVC Main10 with Apple's hardware encoder, like the iPhone (this ffmpeg's libx265 is 8-bit only)
+        enc = (["-c:v", "hevc_videotoolbox", "-profile:v", "main10", "-pix_fmt", "p010le", "-b:v", "8M", "-tag:v", "hvc1"]
                + (["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc"] if hlg else [])
                if codec == "hevc" else ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18"])
         tmp = path.with_suffix(".tmp" + path.suffix) if rotate else path

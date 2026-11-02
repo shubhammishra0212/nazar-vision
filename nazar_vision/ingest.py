@@ -160,21 +160,26 @@ def probe(path):
             "duration": float(info.get("format", {}).get("duration") or s.get("duration") or 0)}
 
 
-def video_filter(p, fps):
+def video_filter(p):
+    """HDR -> SDR filter chain ('' for SDR). Frame sampling is done with the -r output option, not a filter:
+    the ffmpeg that ships with Remotion (the one on this Mac) has no fps/select filters."""
     chain = []
     if p["transfer"] in ("arib-std-b67", "smpte2084"):          # HLG or PQ: HDR -> SDR BT.709
         tin = p["transfer"]
         pin = p["primaries"] if p["primaries"] in ("bt2020", "bt709") else "bt2020"
         mi = "bt2020nc" if p["matrix"] in (None, "bt2020nc", "unknown") else p["matrix"]
-        chain += [f"zscale=tin={tin}:pin={pin}:min={mi}:t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709",
-                  "tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv", "format=yuv420p"]
-    chain.append(f"fps={fps}")
+        # SDR white = 203 nits (ITU-R BT.2408 HLG reference white); mobius keeps everything below that almost
+        # unchanged and rolls brighter highlights off softly (hable darkened SDR-range content by ~35 %, clip
+        # loses highlight texture). Tested on a synthetic HLG encode: mean abs difference 13.6 grey levels.
+        chain += [f"zscale=tin={tin}:pin={pin}:min={mi}:t=linear:npl=203", "format=gbrpf32le", "zscale=p=bt709",
+                  "tonemap=tonemap=mobius:desat=0", "zscale=t=bt709:m=bt709:r=tv", "format=yuv420p"]
     return ",".join(chain)
 
 
 def extract_frames(path, p, fps, folder):
-    cmd = [tool("ffmpeg"), "-v", "error", "-i", str(path), "-vf", video_filter(p, fps), "-q:v", "2",
-           str(folder / "f%05d.jpg")]
+    vf = video_filter(p)
+    cmd = [tool("ffmpeg"), "-v", "error", "-i", str(path)] + (["-vf", vf] if vf else []) + \
+          ["-r", str(fps), "-q:v", "2", str(folder / "f%05d.jpg")]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         raise ValueError(f"ffmpeg failed: {r.stderr.strip()[-300:]}")
