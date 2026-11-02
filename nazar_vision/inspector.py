@@ -58,7 +58,8 @@ class Inspector:
         """Washer, using the radius range and brightness polarity learned from the training photos."""
         side = min(img.shape[:2])
         f = self.cfg.get("radius_frac")
-        rng = (f * side * 0.6, f * side * 1.6) if f else None
+        lo, hi = self.cfg.get("radius_range", [0.6, 1.6])
+        rng = (f * side * lo, f * side * hi) if f else None
         w = locate.find(img, rng, min_contrast=self.cfg.get("min_contrast", 30.0))
         pol = self.cfg.get("polarity", 0)
         if w is not None and pol and np.sign(w.contrast) != pol:

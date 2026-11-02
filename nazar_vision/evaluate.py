@@ -5,9 +5,10 @@
 Sets (from data/split.json and data/synthetic/):
     good (test)       held-out good placements, never seen in training or calibration
     good (calib)      the calibration photos (they SET the hold line, so not independent; shown for reference)
-    real defect       data/defect + data/capture/defect photos kept for testing (none in the first photo set)
+    REAL defect       real damaged washers (footage, data/defect, captures): the test half, and the half that
+                      SET the reject line (shown, but not independent)
     SYNTHETIC defect  fake damage drawn on the held-out good photos (nazar_vision.synth)
-    no part           frames with the washer painted out, a grey frame, a zoomed belt
+    no part           real empty-belt images (footage/empty) and synthetic ones (washer painted out, grey, belt zoom)
     unsure            photos a human could not label (reported only)
 """
 import json
@@ -37,7 +38,8 @@ def _font(size, bold=True):
 
 def histogram(rows, hold, reject, path):
     """Stacked histogram of scores per set, with the hold and reject lines."""
-    sets = [("good (calibration)", "#9aa3ab"), ("good (test)", "#2f8f5b"), ("real defect", "#7a1fa2"),
+    sets = [("good (calibration)", "#9aa3ab"), ("good (test)", "#2f8f5b"), ("REAL defect (sets REJECT)", "#c49be0"),
+            ("REAL defect (test)", "#7a1fa2"),
             ("SYNTHETIC defect", "#d0452f"), ("unsure", "#e0a800")]
     vals = [r["score"] for r in rows if r["verdict"] != "NO_PART"]
     lo, hi = 0.0, max(vals + [reject]) * 1.08
@@ -109,36 +111,50 @@ def stage_timing(insp, paths, repeat=3):
     return {k: round(float(np.median(v)), 1) for k, v in t.items()}
 
 
+def kind_of(rel):
+    parts = Path(rel).parts
+    if "synthetic" in parts:
+        return parts[parts.index("synthetic") + 1]
+    i = parts.index("defect") if "defect" in parts else -1
+    return parts[i + 1] if 0 <= i < len(parts) - 2 else "other"
+
+
 def main():
     split = load_split()
     insp = Inspector.load()
     hold, reject = insp.hold, insp.reject
     todo = [("good (test)", rel) for rel in split["test_good"]]
     todo += [("good (calibration)", rel) for rel in split["calib"]]
-    todo += [("real defect", rel) for rels in split["test_defect"].values() for rel in rels]
+    todo += [("REAL defect (test)", rel) for rels in split["test_defect"].values() for rel in rels]
+    todo += [("REAL defect (sets REJECT)", rel) for rels in split["defect"].values() for rel in rels]
     for kind_dir in sorted((DATA / "synthetic").glob("*")):
-        name = "no part" if kind_dir.name == "nopart" else "SYNTHETIC defect"
+        name = "no part (synthetic)" if kind_dir.name == "nopart" else "SYNTHETIC defect"
         todo += [(name, str(p.relative_to(ROOT))) for p in images.list_images(kind_dir)]
+    todo += [("no part (real empty belt)", rel) for rel in split.get("empty", [])]
     todo += [("unsure", rel) for rel in split["unsure"]]
 
-    train_centres = []
+    train_centres = []                  # in units of the image's short side, so cameras can differ
     for rel in split["train"]:
-        w = insp.find(images.load(ROOT / rel))
+        img = images.load(ROOT / rel)
+        w = insp.find(img)
         if w is not None:
-            train_centres.append((w.cx, w.cy))
+            side = min(img.shape[:2])
+            train_centres.append((w.cx / side, w.cy / side))
     train_centres = np.array(train_centres)
     rows, times = [], []
     for name, rel in todo:
         data = (ROOT / rel).read_bytes()
         t0 = time.perf_counter()
-        res = insp.inspect(images.decode(data))
+        img = images.decode(data)
+        res = insp.inspect(img)
         times.append((time.perf_counter() - t0) * 1000)
-        kind = Path(rel).parent.name if name in ("SYNTHETIC defect", "real defect") else ""
+        kind = kind_of(rel) if "defect" in name else ""
         row = {"set": name, "file": rel, "kind": kind, "verdict": res["verdict"], "score": res["score"],
                "ms": round(times[-1], 1)}
-        if name.startswith("good") and res.get("washer"):
-            c = np.array([res["washer"]["cx"], res["washer"]["cy"]])
-            row["px_to_train"] = round(float(np.min(np.linalg.norm(train_centres - c, axis=1))), 1)
+        if name.startswith("good") and res.get("washer") and len(train_centres):
+            side = min(img.shape[:2])
+            c = np.array([res["washer"]["cx"], res["washer"]["cy"]]) / side
+            row["r_to_train"] = round(float(np.min(np.linalg.norm(train_centres - c, axis=1)) * side / res["washer"]["r"]), 2)
         rows.append(row)
 
     good_paths = [ROOT / rel for rel in split["test_good"] + split["calib"]]
@@ -152,7 +168,7 @@ def main():
     (MODELS / "eval.json").write_text(json.dumps(out, indent=1))
     write_report(out, split, insp.cfg)
     for n, c in out["confusion"].items():
-        print(f"  {n:20s} " + "  ".join(f"{v} {c[v]}" for v in VERDICTS))
+        print(f"  {n:28s} " + "  ".join(f"{v} {c[v]}" for v in VERDICTS))
     print(f"latency per inspection (decode excluded): median {lat['median']} ms, p95 {lat['p95']} ms over {lat['n']}")
     print("stages (ms):", stages)
     print("wrote models/eval.json, docs/score_histogram.png, REPORT.md")
@@ -162,7 +178,9 @@ def write_report(ev, split, cfg):
     rows = ev["rows"]
     hold, reject = ev["hold"], ev["reject"]
     real_defects = sum(len(v) for v in split["test_defect"].values())
-    order = ["good (test)", "good (calibration)", "real defect", "SYNTHETIC defect", "no part", "unsure"]
+    real_set = sum(len(v) for v in split["defect"].values())
+    order = ["good (test)", "good (calibration)", "REAL defect (test)", "REAL defect (sets REJECT)", "SYNTHETIC defect",
+             "no part (real empty belt)", "no part (synthetic)", "unsure"]
     present = [n for n in order if n in ev["confusion"]]
     L = []
     a = L.append
@@ -175,21 +193,31 @@ def write_report(ev, split, cfg):
     a("")
     g, gn = confusion(rows, "good (test)")
     s, sn = confusion(rows, "SYNTHETIC defect")
-    npc, npn = confusion(rows, "no part")
+    npc, npn = confusion(rows, "no part (synthetic)")
+    nrc, nrn = confusion(rows, "no part (real empty belt)")
     a(f"- **Held-out good washers:** {g['PASS']} of {gn} PASS, {g['HOLD']} HOLD, {g['REJECT']} REJECT. "
       f"Only {gn} independent good test photos exist, so this says little yet.")
     a(f"- **SYNTHETIC defects (drawn on, not real):** {s['REJECT']} of {sn} REJECT, {s['HOLD']} HOLD, {s['PASS']} PASS. "
       "This shows the pipeline reacts to a changed outline or face; it is not an accuracy figure for real damage.")
     if real_defects:
-        rd, rdn = confusion(rows, "real defect")
-        a(f"- **Real defects:** {rd['REJECT']} of {rdn} REJECT, {rd['HOLD']} HOLD, {rd['PASS']} PASS.")
+        rd, rdn = confusion(rows, "REAL defect (test)")
+        a(f"- **REAL defects, held out:** {rd['REJECT']} of {rdn} REJECT, {rd['HOLD']} HOLD, {rd['PASS']} PASS.")
     else:
-        a("- **Real defects: none tested.** No photo of a real damaged washer exists yet.")
-    a(f"- **No washer in frame:** {npc['NO_PART']} of {npn} NO_PART (never a defect).")
+        a("- **REAL defects, held out: none.** " + ("Every real defect image went into setting the REJECT line."
+                                                    if real_set else "No photo of a real damaged washer exists yet."))
+    if real_set:
+        rs, rsn = confusion(rows, "REAL defect (sets REJECT)")
+        a(f"- **REAL defects that set the REJECT line** (not independent): {rs['REJECT']} of {rsn} REJECT, "
+          f"{rs['HOLD']} HOLD, {rs['PASS']} PASS.")
+    if nrn:
+        a(f"- **Real empty belt:** {nrc['NO_PART']} of {nrn} NO_PART.")
+    a(f"- **Synthetic no-washer frames:** {npc['NO_PART']} of {npn} NO_PART (never a defect).")
     a(f"- **Speed:** median {ev['latency_ms']['median']} ms, p95 {ev['latency_ms']['p95']} ms per inspection "
       "(after JPEG decode) on the Mac mini M4 CPU. Target < 150 ms.")
     a("")
     a("## Data and split")
+    a("")
+    a(f"Images used: {split.get('sources', 'first set + capture')}.")
     a("")
     a(f"Split by **placement** (a washer lying in one spot, photographed several times), not by photo, so a test photo is never "
       f"a near-copy of a training photo. Byte-identical files are dropped. Placements: {split['groups']['train']} train, "
@@ -200,8 +228,9 @@ def write_report(ev, split, cfg):
     a(f"| Train | {len(split['train'])} | memory bank (x {cfg['rotations']} rotations, brightness +-10 %) |")
     a(f"| Calibration | {len(split['calib'])} | HOLD line |")
     a(f"| Test, good | {len(split['test_good'])} | confusion matrix |")
-    a(f"| Real defects for REJECT line | {sum(len(v) for v in split['defect'].values())} | REJECT line |")
-    a(f"| Test, real defects | {real_defects} | confusion matrix |")
+    a(f"| REAL defects for REJECT line | {real_set} | REJECT line |")
+    a(f"| Test, REAL defects | {real_defects} | confusion matrix |")
+    a(f"| Real empty belt | {len(split.get('empty', []))} | must give NO_PART |")
     a(f"| Unsure | {len(split['unsure'])} | reported only |")
     a("")
     a("## Model and thresholds")
@@ -232,14 +261,14 @@ def write_report(ev, split, cfg):
     a("")
     a("## Every image")
     a("")
-    a("*Distance to train* = how far (pixels) the washer centre is from the nearest training placement. A good test photo "
-      "lying where a training washer lay is an easier test than one somewhere new on the belt.")
+    a("*Distance to train* = how far the washer centre is from the nearest training placement, in washer radii. A good "
+      "test photo lying where a training washer lay is an easier test than one somewhere new on the belt.")
     a("")
     a("| Set | Image | Verdict | Score | Distance to train |")
     a("|---|---|---|---|---|")
     for r in sorted(rows, key=lambda r: (order.index(r["set"]), r["kind"], r["file"])):
         sc = "-" if r["verdict"] == "NO_PART" else f"{r['score']:.3f}"
-        dist = f"{r['px_to_train']:.0f} px" if "px_to_train" in r else ""
+        dist = f"{r['r_to_train']:.2f} r" if "r_to_train" in r else ""
         a(f"| {r['set']}{' / ' + r['kind'] if r['kind'] else ''} | {Path(r['file']).name} | {r['verdict']} | {sc} | {dist} |")
     a("")
     a("## Speed (CPU only)")
@@ -255,17 +284,30 @@ def write_report(ev, split, cfg):
     a("")
     a("## What is NOT verified")
     a("")
-    a("- **Real defects.** " + ("None photographed yet; every defect number above is synthetic." if not real_defects else
-                                 f"Only {real_defects} real defect photos; small sample."))
-    a("- **The first photo set is weak:** the washer face is overexposed (pure white), so real scratches or rust may be invisible "
-      "to the camera; most placements sit at the same spot on the belt; many files were byte-identical copies.")
-    a(f"- **Few independent good tests** ({len(split['test_good'])}). The false-HOLD rate cannot be estimated from that.")
-    tg = [r for r in rows if r["set"] == "good (test)" and "px_to_train" in r]
-    cg = [r for r in rows if r["set"] == "good (calibration)" and "px_to_train" in r]
+    a("- **REAL defects.** " + ("None photographed yet; every defect number above is synthetic." if not (real_defects + real_set) else
+                                 f"{real_defects} held-out + {real_set} threshold-setting real defect images; small sample."))
+    if "first set" in split.get("sources", "first set"):
+        a("- **The first photo set is weak:** the washer face is overexposed (pure white), so real scratches or rust may be "
+          "invisible to the camera; most placements sit at the same spot on the belt; many files were byte-identical copies.")
+    mf = DATA / "footage" / "manifest.csv"
+    if "footage" in split.get("sources", "") and mf.is_file():
+        import csv
+        with mf.open() as f:
+            white = [float(r["clipped_white"]) for r in csv.DictReader(f) if r["kept"] == "yes" and r["clipped_white"]]
+        if white and np.median(white) > 0.2:
+            a(f"- **Overexposed footage:** a median {100 * np.median(white):.0f} % of washer pixels are pure white, so surface "
+              "damage may be invisible. Lower the exposure and retake.")
+        a("- **The live camera path:** training images came from iPhone photos/videos, live frames come from Continuity "
+          "Camera; if the lens or zoom differs, the washer looks different in size and sharpness. Check a few live "
+          "inspections of good washers before trusting the HOLD line.")
+    if len(split["test_good"]) < 30:
+        a(f"- **Few independent good tests** ({len(split['test_good'])}). The false-HOLD rate cannot be estimated well from that.")
+    tg = [r for r in rows if r["set"] == "good (test)" and "r_to_train" in r]
+    cg = [r for r in rows if r["set"] == "good (calibration)" and "r_to_train" in r]
     if tg and cg and np.median([r["score"] for r in tg]) < np.median([r["score"] for r in cg]):
         a(f"- **The good test is easier than it looks:** the test washers lie a median "
-          f"{np.median([r['px_to_train'] for r in tg]):.0f} px from a training placement and score lower than the "
-          f"calibration washers ({np.median([r['px_to_train'] for r in cg]):.0f} px away). A washer somewhere new on the belt "
+          f"{np.median([r['r_to_train'] for r in tg]):.2f} washer radii from a training placement and score lower than the "
+          f"calibration washers ({np.median([r['r_to_train'] for r in cg]):.2f} radii away). A washer somewhere new on the belt "
           "scores higher, closer to HOLD.")
     a("- **The real camera at belt speed** (motion blur, exposure drift) was not tested here.")
     a("")

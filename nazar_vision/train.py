@@ -3,8 +3,10 @@
     python -m nazar_vision.train            # reads data/split.json, writes models/memory_bank.npy + config.json
 
 1. Every training photo: find the washer, crop it, and make 12 copies turned 30 deg apart with the brightness
-   scaled by a random 0.9-1.1 (a washer can lie at any angle; the light drifts a little).
-2. Backbone -> 784 patch vectors per crop. Patches far outside the ring are dropped (they never get scored).
+   scaled by a random 0.9-1.1 (a washer can lie at any angle; the light drifts a little). With many photos
+   (iPhone footage) fewer copies are made so there are at most 600 crops.
+2. Backbone -> 784 patch vectors per crop. Patches far outside the ring are dropped (they never get scored);
+   with very many crops a random subset (<= 250,000 patches in all) goes on to the coreset.
 3. Greedy k-center coreset keeps ~10 % of the patches: the memory bank.
 4. HOLD line = conformal quantile of the calibration scores (good photos the bank has never seen):
    with n scores, the ceil((n+1)(1-alpha))-th smallest, so that a new good washer lands above it with
@@ -43,7 +45,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--coreset", type=float, default=0.10, help="fraction of patches kept (default 0.10)")
     ap.add_argument("--rotations", type=int, default=12)
-    ap.add_argument("--max-bank", type=int, default=30000)
+    ap.add_argument("--max-bank", type=int, default=20000)
+    ap.add_argument("--max-crops", type=int, default=600, help="cap on training crops (photos x rotations)")
+    ap.add_argument("--max-patches", type=int, default=250000, help="random subsample before the coreset")
     args = ap.parse_args()
     t_start = time.time()
     split = load_split()
@@ -73,14 +77,25 @@ def main():
     rng = np.random.default_rng(0)
     region = locate.ring_mask(hole_frac, outer=MASK_OUTER + 0.12, inner=MASK_INNER * 0.6)
     keep = cv2.resize(region, (GRID, GRID), interpolation=cv2.INTER_AREA).reshape(-1) > 0.02
-    crops = [locate.crop(img, w, angle=a, gain=float(rng.uniform(0.9, 1.1)))
-             for img, w in found for a in np.arange(args.rotations) * (360.0 / args.rotations)]
+    # many photos (iPhone footage) -> fewer synthetic rotations each, so the crops stay <= max_crops
+    rotations = max(1, min(args.rotations, args.max_crops // len(found)))
+    jobs = [(i, a) for i in range(len(found)) for a in np.arange(rotations) * (360.0 / rotations)]
+    if len(jobs) > args.max_crops:
+        jobs = [jobs[k] for k in sorted(rng.choice(len(jobs), args.max_crops, replace=False))]
+    per_crop = min(int(keep.sum()), max(1, args.max_patches // len(jobs)))
     t0 = time.time()
-    feats = backbone.embed(crops)
+    parts = []
+    for b in range(0, len(jobs), 32):                        # stream: never hold all crops' features at once
+        crops = [locate.crop(found[i][0], found[i][1], angle=a, gain=float(rng.uniform(0.9, 1.1)))
+                 for i, a in jobs[b:b + 32]]
+        f = backbone.embed(crops)[:, keep]
+        if per_crop < f.shape[1]:
+            f = np.stack([x[rng.choice(len(x), per_crop, replace=False)] for x in f])
+        parts.append(f.reshape(-1, f.shape[-1]))
+    feats = np.ascontiguousarray(np.concatenate(parts))
     backbone_dim = feats.shape[-1]
-    feats = np.ascontiguousarray(feats[:, keep].reshape(-1, backbone_dim))
-    print(f"features: {len(crops)} crops -> {len(feats)} patches ({keep.sum()} of {GRID * GRID} per crop) "
-          f"in {time.time() - t0:.1f} s")
+    print(f"features: {len(jobs)} crops ({len(found)} photos x {rotations} rotations) -> {len(feats)} patches "
+          f"({per_crop} of {GRID * GRID} per crop) in {time.time() - t0:.1f} s")
 
     # ---- 3. coreset
     k = min(args.max_bank, max(1000, int(len(feats) * args.coreset)))
@@ -95,6 +110,7 @@ def main():
            "margin": locate.MARGIN, "sigma": SIGMA, "mask_outer": MASK_OUTER, "mask_inner": MASK_INNER,
            "radius_frac": round(radius_frac, 5), "hole_frac": round(hole_frac, 4) if hole_frac else None,
            "polarity": polarity, "min_contrast": round(min_contrast, 1), "bank": int(len(bank)),
+           "radius_range": [0.5, 2.0],      # live washer may look 0.5-2x the training size (other lens / zoom)
            "hold": 0.0, "reject": 0.0}
     insp = Inspector(cfg, backbone, bank)
 
@@ -130,7 +146,7 @@ def main():
 
     cfg.update(hold=math.ceil(hold * 1e4) / 1e4, reject=math.ceil(reject * 1e4) / 1e4, hold_rule=hold_rule, reject_rule=reject_rule,
                calib_scores={k: v and round(v, 4) for k, v in calib.items()},
-               defect_scores={k: v and round(v, 4) for k, v in defect.items()}, n_train=len(found), rotations=args.rotations,
+               defect_scores={k: v and round(v, 4) for k, v in defect.items()}, n_train=len(found), rotations=rotations, sources=split.get("sources", ""),
                coreset=args.coreset, patches_before_coreset=int(len(feats)),
                trained=time.strftime("%Y-%m-%dT%H:%M:%S"), train_seconds=round(time.time() - t_start, 1))
     (MODELS / "config.json").write_text(json.dumps(cfg, indent=2))
