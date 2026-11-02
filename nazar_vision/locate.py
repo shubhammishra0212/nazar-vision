@@ -97,15 +97,21 @@ def _refine(gray, cx, cy, lo, hi, rounds=3):
         top = grad.max(0)
         if np.median(top) < 6:
             return None
-        edge = np.array([radii[np.where(grad[:, k] > 0.5 * top[k])[0][-1]] for k in range(N_RAYS)]) + 0.25
+        strong = grad > 0.5 * top[None, :]
+        has = strong.any(0) & (top > 0)                                  # a flat ray has no edge at all
+        if has.sum() < 8:
+            return None
+        last = grad.shape[0] - 1 - np.argmax(strong[::-1], axis=0)       # outermost strong edge on each ray
+        edge = radii[last] + 0.25
+        med = np.median(edge[has])
         x, y = cx + edge * np.cos(a), cy + edge * np.sin(a)
-        keep = np.abs(edge - np.median(edge)) < 0.15 * np.median(edge)    # robust start: ignore far outliers
+        keep = has & (np.abs(edge - med) < 0.15 * med)                   # robust start: ignore far outliers
         if keep.sum() < 8:
             return None
         for _ in range(3):
             fx, fy, fr = _fit_circle(x[keep], y[keep])
             res = np.abs(np.hypot(x - fx, y - fy) - fr)
-            keep = res < max(2.0, 2.5 * np.median(res))
+            keep = has & (res < max(2.0, 2.5 * np.median(res[has])))
         if keep.mean() < 0.6:
             return None
         moved = np.hypot(fx - cx, fy - cy)
