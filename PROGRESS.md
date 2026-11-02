@@ -23,10 +23,11 @@ Updated after every step (power cuts). After a restart: read this file and `git 
 - `--test-images data/synthetic` tested: frames replaced in order (burr, burr, ..., nopart), `test_images` in /health.
 - HTTP round trip (curl, 20 calls, warm): 1280x720 JPEG median 50 ms p95 53 ms; 1920x1080 median 47 ms p95 53 ms
   (1080p verdict PASS 0.886, same as 720p). 4 parallel requests all answered. First call after start ~115 ms.
+- `README.md` (setup, run, API, recapture + retrain, layout).
 - Heatmap overlay fades in smoothly (no hard-edged tint); `docs/heatmap_examples.png` (crack, burr, good, unsure).
 
 ## In progress
-- README.md.
+- docs/vision.md explainer + PDF.
 
 ## Next
 - `docs/vision.md` -> `docs/NAZAR-02-Vision-AI.pdf` (tools/mdpdf.py), copy to `../PDFs/`, check render with qlmanage.
