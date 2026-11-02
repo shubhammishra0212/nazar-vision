@@ -192,7 +192,7 @@ def analyse(img, label, cfg):
             a["reason"] = "washer found in an empty-belt image"
         return a
     if wsh is None:
-        a["reason"] = "no washer found"
+        a["reason"] = "no washer found (or cut by the frame edge)"
         return a
     a.update(cx=round(wsh.cx, 1), cy=round(wsh.cy, 1), r=round(wsh.r, 1), ratio=round(wsh.r / min(h, w), 4),
              hole=round(wsh.hole, 1) if wsh.hole else None)

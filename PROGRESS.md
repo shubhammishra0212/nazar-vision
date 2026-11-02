@@ -30,10 +30,23 @@ Updated after every step (power cuts). After a restart: read this file and `git 
   (7 pages, checked page by page) and copied to `../PDFs/NAZAR-02-Vision-AI.pdf`.
 - Re-evaluated on an idle machine: in-process median 45 ms, p95 52 ms.
 
-## In progress (task 2: iPhone footage pipeline)
-- `nazar_vision/ingest.py` + `ingest.sh`: footage/good, footage/defect/<kind>, footage/empty -> frames (ffmpeg ~4 fps,
-  HDR tone-map, rotation) -> locator filters (one washer, inside frame, sharp, not near-duplicate, cap per clip)
-  -> data/footage/... + manifest CSV. Each clip = one placement group.
+## Task 2: iPhone photos (primary) + videos -> training images
+### Done
+- `nazar_vision/ingest.py` + `ingest.sh` (commit 838946c): photos HEIC (sips -> JPEG, primary/SDR image) / JPG / PNG,
+  EXIF orientation applied, EXIF capture time, bursts (< 2 s, centre within 6 % r) = one group; videos via ffmpeg
+  (4 fps, HLG/PQ tone-map, rotation metadata); filters: one washer, inside frame (10 % r margin), sharpness >= 15
+  (Laplacian var on the 224 crop), near-copies, 12/clip cap, size outliers; manifest `data/footage/manifest.csv`;
+  per-source records in `data/footage/_records/` so reruns skip finished sources.
+- Locator crash fixed (flat ray -> IndexError) in `locate.py` (commit 6c2c920) - also protects the live service.
+- `nazar_vision/fake_footage.py` (FAKE test data only).
+- Photo path tested on a FAKE set (scratchpad, not in repo): 21 good files -> 16 kept. Burst of 3 -> 1 kept (2 near-copy),
+  blurred -> dropped, washer cut by edge -> dropped, two washers -> dropped, orientation-6 HEIC stored sideways ->
+  upright (mean abs diff 0.74 vs 50.8 if wrong), 48 MP HEIC -> 1920x1080, PNG without EXIF kept; 2 fake chipped
+  defects + 1 empty belt kept. White-pixel warning fires (77 %). Rerun skips all sources (0.17 s).
+
+### In progress
+- split/train/evaluate: footage groups, real empty-belt frames, REAL defects set REJECT (midway) and are reported apart
+  from synthetic; cap training crops for hundreds of images.
 
 ## Next
 - split/train/evaluate: footage clips as groups, real empty-belt frames, REAL defects set REJECT (midway) and are

@@ -57,7 +57,7 @@ def shifted(img, dx, dy, angle=0.0):
     h, w = img.shape[:2]
     m = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
     m[:, 2] += (dx, dy)
-    return cv2.warpAffine(img, m, (w, h), borderMode=cv2.BORDER_REFLECT)
+    return cv2.warpAffine(img, m, (w, h), borderMode=cv2.BORDER_REPLICATE)   # reflect would mirror a 2nd washer in
 
 
 def to_1080(img):
@@ -72,7 +72,7 @@ def photos(out):
     for i, p in enumerate(good[:12]):                        # 12 placements, washer moved around the belt
         img = to_1080(images.load(p))
         dx, dy = ((i % 4) - 1.5) * 160, ((i // 4) - 1) * 120
-        img = shifted(img, dx, dy, angle=15 * i)
+        img = shifted(img, dx, dy, angle=(i % 5 - 2) * 5)
         heic = i % 3 != 2
         f = save(img, out / "good" / f"IMG_{4100 + i}.{'HEIC' if heic else 'JPG'}", t, heic=heic)
         cases.append((f.name, "good, own placement"))
@@ -94,23 +94,26 @@ def photos(out):
     cases.append((f.name, "blurred -> dropped"))
     t += 20
     w = locate.find(base)
-    f = save(shifted(base, 960 - w.cx + 20, 0), out / "good" / "IMG_4303.HEIC", t, heic=True)
+    f = save(shifted(base, 1920 - 0.5 * w.r - w.cx, 0), out / "good" / "IMG_4303.HEIC", t, heic=True)
     cases.append((f.name, "washer cut by the frame edge -> dropped"))
     t += 20
     two = shifted(base, 300, 0)
     r = int(w.r * 1.15)
     patch = base[int(w.cy) - r:int(w.cy) + r, int(w.cx) - r:int(w.cx) + r]
-    two[100:100 + 2 * r, 200:200 + 2 * r] = patch
+    disc = np.zeros(patch.shape[:2], np.uint8)
+    cv2.circle(disc, (r, r), int(w.r * 1.04), 255, -1)
+    roi = two[620:620 + 2 * r, 300:300 + 2 * r]              # second washer on the belt, round cut-out
+    roi[disc > 0] = patch[disc > 0]
     f = save(two, out / "good" / "IMG_4304.HEIC", t, heic=True)
     cases.append((f.name, "two washers -> dropped"))
     t += 20
-    f = save(shifted(base, -300, 100, 40), out / "good" / "Screenshot-no-exif.png")
+    f = save(shifted(base, -300, 100, 8), out / "good" / "Screenshot-no-exif.png")
     cases.append((f.name, "PNG without EXIF -> own group, file time"))
     for j, p in enumerate(good[12:14]):                     # fake 'chipped' defects (synthetic notch)
         img = to_1080(images.load(p))
         ww = locate.find(img)
         bad = synth.draw(img, ww, "notch", np.random.default_rng(j))
-        f = save(shifted(bad, -100 * j, 80 * j, 33 * j), out / "defect" / "chipped" / f"IMG_{4400 + j}.HEIC", t, heic=True)
+        f = save(shifted(bad, -100 * j, 80 * j, 6 * j), out / "defect" / "chipped" / f"IMG_{4400 + j}.HEIC", t, heic=True)
         cases.append((f.name, "FAKE chipped defect"))
         t += 20
     belt = synth.remove_washer(base, w)
@@ -147,7 +150,7 @@ def write_clip(frames, path, fps=30, codec="h264", hlg=False, rotate=0):
 def clip_frames(img, seconds=10, fps=30, positions=7, blur_moves=True, rng=None):
     """Washer moved to `positions` spots (and turned), held ~still, motion-blurred while moving."""
     rng = rng or np.random.default_rng(0)
-    spots = [(rng.uniform(-260, 260), rng.uniform(-160, 160), rng.uniform(0, 360)) for _ in range(positions)]
+    spots = [(rng.uniform(-260, 260), rng.uniform(-160, 160), rng.uniform(-12, 12)) for _ in range(positions)]
     n = seconds * fps
     per = n // positions
     frames = []
