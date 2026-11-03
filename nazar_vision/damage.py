@@ -47,9 +47,11 @@ def _region(amap, mask, thr):
     return ((amap >= thr) & (mask > 0.5)).astype(np.uint8)
 
 
-def describe(cfg, amap, mask, feats, score, library):
-    """-> {kind, label, spots, clock, zone, where, area_pct, match, text} for a flagged washer."""
-    thr = max(cfg["hold"], 0.85 * score)
+def describe(cfg, amap, mask, feats, score, library, thr=None):
+    """-> {kind, label, spots, clock, zone, where, area_pct, match, text} for a flagged washer.
+    thr: level of `amap` that counts as damaged (default: from the anomaly HOLD line and the score)."""
+    if thr is None:
+        thr = max(cfg["hold"], 0.85 * score)
     region = _region(amap, mask, thr)
     n, lab, stats, _ = cv2.connectedComponentsWithStats(region, connectivity=8)
     spots = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= MIN_SPOT_PX]
@@ -88,13 +90,16 @@ def describe(cfg, amap, mask, feats, score, library):
             "area_pct": area_pct, "match": match, "text": text}
 
 
-def build(rotations=12, log=print):
-    """Damage library from data/footage/defect/<kind>/ scored against the current memory bank."""
+def build(rotations=12, variants=3, log=print):
+    """Damage library from data/footage/defect/<kind>/ scored against the current memory bank.
+    Each turned copy is also taken through `variants` random camera changes (as the good bank was trained), so a
+    trained damage is still recognised through the line camera."""
     from .inspector import Inspector
     t0 = time.time()
     insp = Inspector.load()
     grid_mask = cv2.resize(insp.mask, (GRID, GRID), interpolation=cv2.INTER_AREA).reshape(-1) > 0.5
     feats, kinds, seen = [], [], {}
+    rng = np.random.default_rng(7)
     for kdir in sorted(d for d in (FOOT / "defect").glob("*") if d.is_dir()):
         for p in images.list_images(kdir):
             img = images.load(p)
@@ -103,12 +108,14 @@ def build(rotations=12, log=print):
                 log(f"  {p.name}: no washer found, skipped")
                 continue
             for a in np.arange(rotations) * (360.0 / rotations):
-                f = insp.backbone.embed([locate.crop(img, w, angle=a)])[0]
-                dist = insp.memory.nearest(f)
-                dist[~grid_mask] = -1
-                top = np.argsort(dist)[-PER_CROP:]
-                feats.append(f[top])
-                kinds += [kdir.name] * len(top)
+                base = locate.crop(img, w, angle=a)
+                for crop in [base] + [locate.camera_change(base, rng) for _ in range(variants)]:
+                    f = insp.backbone.embed([crop])[0]
+                    dist = insp.memory.nearest(f)
+                    dist[~grid_mask] = -1
+                    top = np.argsort(dist)[-PER_CROP:]
+                    feats.append(f[top])
+                    kinds += [kdir.name] * len(top)
             seen[kdir.name] = seen.get(kdir.name, 0) + 1
     if not feats:
         raise SystemExit("no damaged washers in data/footage/defect/<kind>/")

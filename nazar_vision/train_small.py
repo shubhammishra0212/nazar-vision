@@ -33,6 +33,7 @@ def rel(p):
 
 def main():
     ap = bank_args(rotations=24)          # few photos: more turned copies each
+    ap.set_defaults(camera_aug=0.6)       # and the line camera's look: light, contrast, focus, resolution
     ap.add_argument("--unsure", help="folder of photos to score only (never trained on, never sets a line)")
     args = ap.parse_args()
     t_start = time.time()

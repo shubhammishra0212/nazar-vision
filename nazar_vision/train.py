@@ -48,6 +48,8 @@ def bank_args(argv=None, rotations=12):
     ap.add_argument("--max-bank", type=int, default=20000)
     ap.add_argument("--max-crops", type=int, default=600, help="cap on training crops (photos x rotations)")
     ap.add_argument("--max-patches", type=int, default=250000, help="random subsample before the coreset")
+    ap.add_argument("--camera-aug", type=float, default=0.0,
+                    help="share of crops given a random camera change (light, contrast, focus, resolution)")
     return ap
 
 
@@ -92,6 +94,8 @@ def build_bank(found, args, log=print):
     for b in range(0, len(jobs), 32):                        # stream: never hold all crops' features at once
         crops = [locate.crop(found[i][0], found[i][1], angle=a, gain=float(rng.uniform(0.9, 1.1)))
                  for i, a in jobs[b:b + 32]]
+        if args.camera_aug:
+            crops = [locate.camera_change(c, rng) if rng.random() < args.camera_aug else c for c in crops]
         f = backbone().embed(crops)[:, keep]
         if per_crop < f.shape[1]:
             f = np.stack([x[rng.choice(len(x), per_crop, replace=False)] for x in f])
@@ -112,7 +116,7 @@ def build_bank(found, args, log=print):
            "polarity": polarity, "min_contrast": round(min_contrast, 1), "bank": int(len(bank)),
            "radius_range": [0.5, 2.0],      # live washer may look 0.5-2x the training size (other lens / zoom)
            "hold": 0.0, "reject": 0.0, "n_train": len(found), "rotations": rotations,
-           "coreset": args.coreset, "patches_before_coreset": int(len(feats))}
+           "coreset": args.coreset, "patches_before_coreset": int(len(feats)), "camera_aug": args.camera_aug}
     return bank, cfg
 
 

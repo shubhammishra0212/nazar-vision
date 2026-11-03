@@ -1,5 +1,6 @@
 #!/bin/bash
-# One command after recapturing: ingest -> split -> synthetic test images -> train -> damage library -> evaluate (rewrites REPORT.md).
+# One command after recapturing: ingest -> split -> synthetic test images -> train -> damage library -> trained-damage line
+# (match) -> evaluate (rewrites REPORT.md).
 # ingest runs when footage/ exists or folders were ingested before (./ingest.sh <folder> --label ...):
 #   iPhone photos/videos in footage/good, footage/defect/<kind>, footage/empty -> data/footage/
 # Other photos: data/capture/good, data/capture/defect/<kind> (console captures), data/defect/<kind>,
@@ -17,9 +18,9 @@ if [ ! -f models/backbone.onnx ]; then
   exit 1
 fi
 FROM=${1:-ingest}
-case "$FROM" in ingest|split|synth|train|damage|evaluate) ;; *) echo "unknown stage '$FROM' (ingest, split, synth, train, damage, evaluate)"; exit 1;; esac
+case "$FROM" in ingest|split|synth|train|damage|match|evaluate) ;; *) echo "unknown stage '$FROM' (ingest, split, synth, train, damage, match, evaluate)"; exit 1;; esac
 run=0
-for stage in ingest split synth train damage evaluate; do
+for stage in ingest split synth train damage match evaluate; do
   [ "$stage" = "$FROM" ] && run=1
   [ $run = 1 ] || { echo "== skip $stage"; continue; }
   if [ "$stage" = ingest ] && [ ! -d footage ] && [ ! -d data/footage/_records ]; then

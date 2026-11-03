@@ -1,4 +1,13 @@
-"""One inspection: frame -> washer -> crop -> patch features -> distance to good memory -> verdict + heatmap."""
+"""One inspection: frame -> washer -> crop -> patch features -> distance to good memory -> verdict + heatmap.
+
+Two ways to decide (models/config.json):
+- anomaly (default): the score is how unlike every good washer the worst spot is; above REJECT = REJECT.
+- trained damage only ("match_reject" set by `python -m nazar_vision.match`): the score is the summed evidence that
+  the washer carries one of the TRAINED damages (data/footage/defect/<kind>, e.g. the demo dent and scar washers),
+  i.e. how much closer its patches are to that damage library than to any good patch, divided by match_reject.
+  1.0 is the reject line and there is no HOLD band. Marks that look like neither (light, stains, small scratches)
+  give no evidence, so those washers pass.
+"""
 import json
 import time
 
@@ -41,6 +50,8 @@ class Inspector:
         self.memory = Memory(bank)
         self.library = library              # damage.Library: names the damage on a flagged washer (optional)
         self.mask = locate.ring_mask(cfg["hole_frac"], outer=cfg["mask_outer"], inner=cfg["mask_inner"])
+        self.grid_mask = (cv2.resize(self.mask, (GRID, GRID), interpolation=cv2.INTER_AREA).reshape(-1) > 0.5).astype(np.float32)
+        self.matching = bool(library is not None and library.kinds and cfg.get("match_reject"))
         self.score_crop(np.full((CROP, CROP, 3), 128, np.uint8))    # warm-up run
 
     @classmethod
@@ -53,8 +64,14 @@ class Inspector:
         return cls(cfg, Backbone(models / "backbone.onnx"), np.load(models / "memory_bank.npy"),
                    damage.Library.load(models / "damage_library.npz"))
 
-    hold = property(lambda self: self.cfg["hold"])
-    reject = property(lambda self: self.cfg["reject"])
+    hold = property(lambda self: 1.0 if self.matching else self.cfg["hold"])
+    reject = property(lambda self: 1.0 if self.matching else self.cfg["reject"])
+
+    def evidence(self, feats, dist):
+        """Per patch (GRID*GRID,): how much closer it is to the trained damage library than to the nearest good
+        patch (0 when a good patch is closer, and outside the scored ring)."""
+        dl = np.min([m.nearest(feats) for m in self.library.memory.values()], axis=0)
+        return np.maximum(0.0, dist - dl) * self.grid_mask
 
     def find(self, img):
         """Washer, using the radius range and brightness polarity learned from the training photos."""
@@ -84,12 +101,27 @@ class Inspector:
             out.update(crop=png_b64(thumbnail(img)), heatmap="", box=None)
         else:
             crop = locate.crop(img, w)
-            score, amap, feats = self.score_crop(crop, with_feats=True)
+            feats = self.backbone.embed([crop])[0]
+            dist = self.memory.nearest(feats)
+            amap = anomaly_map(dist, self.cfg["sigma"]) * self.mask
+            if self.matching:
+                ev = self.evidence(feats, dist)
+                emap = anomaly_map(ev, self.cfg["sigma"]) * self.mask
+                score = float(ev.sum()) / self.cfg["match_reject"]
+                out["anomaly"] = round(float(amap.max()), 4)
+            else:
+                emap, score = amap, float(amap.max())
             out["verdict"] = "PASS" if score <= hold else "HOLD" if score < reject else "REJECT"
             out["score"] = round(score, 4)
             if out["verdict"] != "PASS":
-                out["damage"] = damage.describe({**self.cfg, "hold": hold}, amap, self.mask, feats, score, self.library)
-            out.update(crop=png_b64(crop), heatmap=png_b64(heat_overlay(crop, amap, self.mask, 0.6 * hold, reject)),
+                if self.matching:      # where the trained damage shows: the strong part of the evidence map
+                    out["damage"] = damage.describe(self.cfg, emap, self.mask, feats, score, self.library,
+                                                    thr=0.35 * float(emap.max()))
+                else:
+                    out["damage"] = damage.describe({**self.cfg, "hold": hold}, amap, self.mask, feats, score,
+                                                    self.library)
+            lo, hi = (0.1 * self.cfg["match_heat"], self.cfg["match_heat"]) if self.matching else (0.6 * hold, reject)
+            out.update(crop=png_b64(crop), heatmap=png_b64(heat_overlay(crop, emap, self.mask, lo, hi)),
                        box=w.box(img.shape))
             f = self.cfg.get("radius_frac")
             out["washer"] = {"cx": round(w.cx, 1), "cy": round(w.cy, 1), "r": round(w.r, 1),
@@ -101,4 +133,5 @@ class Inspector:
     def health(self):
         return {"ok": True, "model": self.cfg.get("model", MODEL_NAME), "hold": round(self.hold, 4),
                 "reject": round(self.reject, 4), "bank": len(self.memory),
-                "damage_kinds": self.library.kinds if self.library else []}
+                "damage_kinds": self.library.kinds if self.library else [],
+                "decide": "trained damage only" if self.matching else "anomaly"}

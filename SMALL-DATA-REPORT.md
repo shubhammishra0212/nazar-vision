@@ -1,17 +1,17 @@
-# Small-data model (03 Nov 2026 04:55)
+# Small-data model (03 Nov 2026 07:53)
 
-Trained on 6 good iPhone photos (6 washers x 24 turned copies, bank 10137 patches). HOLD = 2.0232 (largest of 6 leave-one-out good scores (alpha 0.1, n < 9)); REJECT = 2.1045 (halfway between HOLD and the lowest of 2 real defect scores).
+Trained on 6 good iPhone photos (6 washers x 24 turned copies, bank 10137 patches). HOLD = 2.1068 (largest of 6 leave-one-out good scores (alpha 0.1, n < 9)); REJECT = 2.1366 (halfway between HOLD and the lowest of 2 real defect scores).
 
 ## Good washers, each scored by a model that never saw it (leave-one-out)
 
 | Photo | Score | Verdict |
 |---|---|---|
-| IMG_2754-19545f9662.jpg | 1.583 | PASS |
-| IMG_2756-b1d3849833.jpg | 1.804 | PASS |
-| IMG_2757-024ac6d3b8.jpg | 1.982 | PASS |
-| IMG_2761-f99f632dcd.jpg | 2.023 | PASS |
-| IMG_2766-6f538dd46e.jpg | 1.630 | PASS |
-| IMG_2767-7719fa9e0e.jpg | 1.986 | PASS |
+| IMG_2754-19545f9662.jpg | 1.649 | PASS |
+| IMG_2756-b1d3849833.jpg | 1.807 | PASS |
+| IMG_2757-024ac6d3b8.jpg | 1.987 | PASS |
+| IMG_2761-f99f632dcd.jpg | 2.107 | PASS |
+| IMG_2766-6f538dd46e.jpg | 1.679 | PASS |
+| IMG_2767-7719fa9e0e.jpg | 2.007 | PASS |
 
 All of these are PASS by construction (HOLD is their maximum); the spread shows how much room there is.
 
@@ -19,27 +19,20 @@ All of these are PASS by construction (HOLD is their maximum); the spread shows 
 
 | Photo | Kind | Score | Verdict | Verdict if its own score had not set REJECT |
 |---|---|---|---|---|
-| IMG_2762-6ee25f2f94.jpg | dent | 2.333 | REJECT | REJECT |
-| IMG_2763-bdc9728090.jpg | scar | 2.186 | REJECT | REJECT |
+| IMG_2762-6ee25f2f94.jpg | dent | 2.443 | REJECT | REJECT |
+| IMG_2763-bdc9728090.jpg | scar | 2.166 | REJECT | HOLD |
 
-Leave-one-out on the defects: 2 of 2 still REJECT.
+Leave-one-out on the defects: 1 of 2 still REJECT.
 
 ## Synthetic damage on held-out good photos (kinds never trained on)
 
 | Kind | Lowest score | REJECT | HOLD | PASS |
 |---|---|---|---|---|
-| notch | 3.175 | 6 | 0 | 0 |
-| burr | 2.585 | 6 | 0 | 0 |
-| crack | 3.047 | 6 | 0 | 0 |
-| spot | 3.592 | 6 | 0 | 0 |
-| scratch | 2.329 | 6 | 0 | 0 |
-
-## Unsure photos (not trained on, did not set any line)
-
-| Photo | Score | Verdict |
-|---|---|---|
-| IMG_2755-9aa16a3629.jpg | 2.245 | REJECT |
-| IMG_2758-366adf7d43.jpg | 2.062 | HOLD |
+| notch | 3.226 | 6 | 0 | 0 |
+| burr | 2.646 | 6 | 0 | 0 |
+| crack | 3.074 | 6 | 0 | 0 |
+| spot | 3.634 | 6 | 0 | 0 |
+| scratch | 2.331 | 6 | 0 | 0 |
 
 ## Limits of this model
 

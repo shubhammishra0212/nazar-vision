@@ -244,6 +244,21 @@ def crop(img, washer, angle=0.0, gain=1.0):
     return rgb
 
 
+def camera_change(crop_rgb, rng):
+    """A random change of camera on a crop: brightness, contrast curve, resolution and focus. Training with these
+    teaches the model what a washer looks like through another camera (the line's tunnel camera never looks
+    exactly like the hand-held training photos), so the light alone no longer makes a good washer look damaged."""
+    x = np.clip((crop_rgb.astype(np.float32) / 255) ** rng.uniform(0.8, 1.25) * rng.uniform(0.75, 1.3), 0, 1)
+    x = (x * 255).astype(np.uint8)
+    u = rng.uniform(0.35, 1.0)
+    if u < 0.9:
+        s = max(16, int(CROP * u))
+        x = cv2.resize(cv2.resize(x, (s, s), interpolation=cv2.INTER_AREA), (CROP, CROP), interpolation=cv2.INTER_LINEAR)
+    if rng.random() < 0.3:
+        x = cv2.GaussianBlur(x, (0, 0), rng.uniform(0.5, 1.2))
+    return x
+
+
 def edge_sharpness(crop_rgb):
     """How crisp the outer rim is on a crop: steepest brightness step across the rim (grey levels per pixel)
     divided by the ring-to-belt contrast, median over 96 rays. About 0.35-0.5 when sharp, 0.26 after a 2 px
