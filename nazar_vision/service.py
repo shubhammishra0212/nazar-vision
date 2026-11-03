@@ -4,6 +4,7 @@
 
 GET  /health                     model, thresholds, bank size, version
 POST /inspect[?hold=&reject=]    JPEG/PNG bytes -> verdict PASS | HOLD | REJECT | NO_PART, score, crop, heatmap, box
+POST /locate                     JPEG/PNG bytes (a small frame is enough) -> is a whole washer in view, and where
 POST /capture?label=good|defect[&kind=scratch]   JPEG/PNG bytes -> data/capture/<label>/[<kind>/]<timestamp>.jpg
 
 Every response is JSON with Access-Control-Allow-Origin: *. Errors are {"ok": false, "error": "..."} with HTTP 200.
@@ -22,7 +23,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import DATA, MODELS, ROOT, VERSION, images
+from . import DATA, MODELS, ROOT, VERSION, images, locate
 
 MAX_BODY = 30 * 1024 * 1024
 
@@ -101,7 +102,8 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(url.query)
         try:
             fn = {("GET", "/health"): self.health, ("GET", "/"): self.health,
-                  ("POST", "/inspect"): self.inspect, ("POST", "/capture"): self.capture}.get((method, url.path))
+                  ("POST", "/inspect"): self.inspect, ("POST", "/locate"): self.locate,
+                  ("POST", "/capture"): self.capture}.get((method, url.path))
             if fn is None:
                 self._send({"ok": False, "error": f"unknown endpoint {method} {url.path}"})
             else:
@@ -170,6 +172,22 @@ class Handler(BaseHTTPRequestHandler):
         if not self.quiet:
             sys.stderr.write(f"{time.strftime('%H:%M:%S')} inspect {out['verdict']:7s} score {out['score']:.3f} "
                              f"{out['ms']} ms{'  ' + path.name if st.test_cycle else ''}\n")
+        return out
+
+    def locate(self, q):
+        """The console's camera part trigger: only the washer finder, no AI. A washer cut by the frame edge is not
+        found, so found = true means a whole washer is in view. Not under the inspection lock: it never waits."""
+        img = images.decode(self._body())
+        st = self.state
+        if st.inspector is None:
+            st.load()
+        t0 = time.perf_counter()
+        w = st.inspector.find(img) if st.inspector else locate.find(img)
+        h, wd = img.shape[:2]
+        out = {"ok": True, "found": w is not None, "w": wd, "h": h}
+        if w is not None:
+            out.update(cx=round(w.cx, 1), cy=round(w.cy, 1), r=round(w.r, 1))
+        out["ms"] = round((time.perf_counter() - t0) * 1000)
         return out
 
     def capture(self, q):

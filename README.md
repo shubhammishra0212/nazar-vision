@@ -41,6 +41,7 @@ All responses are JSON with `Access-Control-Allow-Origin: *`; `OPTIONS` is answe
 |---|---|---|
 | `GET /health` | | `{"ok":true,"model":"patchcore-wrn50","hold":1.347,"reject":1.8184,"bank":15206,"version":"2.0.0"}` |
 | `POST /inspect` (optional `?hold=&reject=`) | JPEG or PNG bytes | `{"ok":true,"verdict":"PASS","score":0.896,"hold":..,"reject":..,"ms":50,"crop":"<base64 PNG>","heatmap":"<base64 PNG>","box":[x,y,w,h],"washer":{...}}` |
+| `POST /locate` | JPEG or PNG bytes (640 px is enough) | `{"ok":true,"found":true,"w":640,"h":480,"cx":304.5,"cy":240.2,"r":37.2,"ms":3}`: washer finder only, for the console's camera part trigger; a washer cut by the frame edge is not found |
 | `POST /capture?label=good\|defect&kind=scratch` | JPEG or PNG bytes | `{"ok":true,"saved":"data/capture/defect/scratch/20261102-130512-345.jpg",...}` |
 
 - `NO_PART`: no washer found. `score` is 0, `box` is null, `heatmap` is `""` and `crop` is a small thumbnail of the
