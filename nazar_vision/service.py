@@ -7,6 +7,9 @@ POST /inspect[?hold=&reject=]    JPEG/PNG bytes -> verdict PASS | HOLD | REJECT 
 POST /locate                     JPEG/PNG bytes (a small frame is enough) -> is a whole washer in view, and where
 POST /capture?label=good|defect[&kind=scratch]   JPEG/PNG bytes -> data/capture/<label>/[<kind>/]<timestamp>.jpg
 
+Every frame posted to /inspect is also kept in data/live/<time>-<verdict>-<score>.jpg, so the model can be
+retrained on the rig's own camera view (the line camera never looks like hand-held photos).
+
 Every response is JSON with Access-Control-Allow-Origin: *. Errors are {"ok": false, "error": "..."} with HTTP 200.
 The service keeps running without a trained model: /capture still works, /health and /inspect say what is missing.
 --test-images DIR: every posted /inspect frame is replaced by the next photo from DIR (demo without a camera).
@@ -26,6 +29,18 @@ from urllib.parse import parse_qs, urlparse
 from . import DATA, MODELS, ROOT, VERSION, images, locate
 
 MAX_BODY = 30 * 1024 * 1024
+LIVE = DATA / "live"
+
+
+def keep_live(data, out):
+    """Save an inspected frame for retraining; never let a full disk break an inspection."""
+    try:
+        LIVE.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+        ext = "jpg" if data[:3] == b"\xff\xd8\xff" else "png"
+        (LIVE / f"{stamp}-{out['verdict']}-{out['score']:.3f}.{ext}").write_bytes(data)
+    except OSError:
+        pass
 
 
 class State:
@@ -169,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
         out["ms"] = round((time.perf_counter() - t0) * 1000)
         if st.test_cycle:
             out["test_image"] = path.name
+        else:
+            keep_live(data, out)
         if not self.quiet:
             sys.stderr.write(f"{time.strftime('%H:%M:%S')} inspect {out['verdict']:7s} score {out['score']:.3f} "
                              f"{out['ms']} ms{'  ' + path.name if st.test_cycle else ''}\n")
