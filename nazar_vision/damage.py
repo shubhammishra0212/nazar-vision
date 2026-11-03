@@ -24,7 +24,7 @@ from .memory import Memory
 FOOT = DATA / "footage"
 LIBRARY = MODELS / "damage_library.npz"
 KIND_TEXT = {"dent": "Dent", "scar": "Scar", "scratch": "Scratch", "chipped": "Chipped edge", "rust": "Rust",
-             "burr": "Burr", "crack": "Crack", "wrong-size": "Wrong size", "other": "Damage"}
+             "burr": "Burr", "crack": "Crack", "wrong-size": "Wrong size", "patch": "Dark patch", "other": "Damage"}
 MIN_SPOT_PX = 30           # regions smaller than this (of a 224 x 224 crop) are noise
 PER_CROP = 40              # brightest patches kept per turned copy of a damaged washer
 
